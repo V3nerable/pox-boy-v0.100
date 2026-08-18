@@ -7009,7 +7009,10 @@
         let radioServerOffset = 0;     // ms skew vs the satellite, via /.info/serverTimeOffset (phone clocks lie)
         let radioSyncOn = localStorage.getItem('pipboy-radio-sync') !== 'off'; // default ON
         let radioAppliedEpoch = {};    // { sid: epoch } this unit last joined with -- a change = SKIP/RESTART
-        let radioSyncTimer = null;     // 5s drift watchdog while synced
+        let radioLocalOffset = 0;  // v0.105: manual sync adjustment in seconds
+        let radioSyncTimer = null;
+        let radioNextTrackAudio = null;  // v0.105: for predictive buffering
+        let radioCrossfadeAudio = null;  // v0.105: for crossfade transitions     // 5s drift watchdog while synced
         let radioOrder = {};           // v0.56: free-run shuffle memory { sid: [trackIdx,...] }
         const radioAudio = new Audio();
         radioAudio.preload = 'auto';
@@ -7024,6 +7027,7 @@
         function initRadio() {
             radioDlState = JSON.parse(localStorage.getItem('pipboy-radio-dl') || '{}');
             radioPos = JSON.parse(localStorage.getItem('pipboy-radio-pos') || '{}');
+            radioLocalOffset = parseFloat(localStorage.getItem('pipboy-radio-offset') || '0');  // v0.105: load manual offset
             fetch('radio-stations.json').then(r => r.json()).then(m => {
                 radioManifest = m;
                 m.stations.forEach(s => { s.totalDur = s.tracks.reduce((a, t) => a + (t.d || 0), 0); }); // v0.54: sync math needs loop lengths
@@ -7104,16 +7108,133 @@
                     const p = radioLivePos(radioCur); // re-derive AT load time -- buffering burned wall-clock
                     const want = (p && p.idx === radioTrackIdx) ? p.seek : (startAt || 0);
                     radioAudio.currentTime = Math.max(0, Math.min(want, (radioAudio.duration || want) - 0.25));
+                    
+                    // v0.105: Predictive buffering - pre-load next track 8s before end
+                    scheduleNextTrackPreload(st, synced);
                 } catch (e) {}
-            } : null;
+            } : () => {
+                // v0.105: Also schedule for free-run mode
+                scheduleNextTrackPreload(st, synced);
+            };
             radioAudio.onended = synced ? () => radioSyncBoundary(0)
-                                        : () => { radioStatic(550); radioNext(); };
+                                        : () => { 
+                                            // v0.105: Use crossfade if next track is pre-loaded
+                                            if (radioNextTrackAudio && radioNextTrackAudio.readyState >= 2) {
+                                                radioCrossfadeToNext();
+                                            } else {
+                                                radioStatic(550); 
+                                                radioNext(); 
+                                            }
+                                        };
             radioAudio.onerror = () => {
                 if (now) now.innerText = 'NO SIGNAL -- ' + st.name + ' NEEDS THE PACK ([⇩] BELOW) OR A LIVE LINK.';
             };
             radioAudio.play().catch(() => {});
             if (now) now.innerText = (synced ? 'LIVE · ' : '') + st.name + ' :: ' + tr.a + ' — ' + tr.t;
             renderRadioTab();
+        }
+        
+        // v0.105: Pre-load next track before current one ends
+        function scheduleNextTrackPreload(st, synced) {
+            if (!radioAudio.duration) return;
+            
+            const preloadTime = Math.max(0, (radioAudio.duration - radioAudio.currentTime - 8) * 1000);
+            setTimeout(() => {
+                if (!radioCur || radioTrackIdx === undefined) return;
+                
+                // Calculate next track index
+                const nextIdx = (radioTrackIdx + 1) % st.tracks.length;
+                const nextTrack = radioTrackAt(st, radioCur, nextIdx);
+                
+                // Pre-load into buffer audio
+                if (!radioNextTrackAudio) {
+                    radioNextTrackAudio = new Audio();
+                    radioNextTrackAudio.preload = 'auto';
+                }
+                radioNextTrackAudio.src = trackUrl(st, nextTrack);
+                radioNextTrackAudio.load();
+                
+                // v0.105: Schedule crossfade 1.5s before end (free-run only)
+                if (!synced) {
+                    const crossfadeTime = Math.max(0, (radioAudio.duration - radioAudio.currentTime - 1.5) * 1000);
+                    setTimeout(() => {
+                        if (radioCur && radioNextTrackAudio && radioNextTrackAudio.readyState >= 2) {
+                            radioCrossfadeToNext();
+                        }
+                    }, crossfadeTime);
+                }
+            }, preloadTime);
+        }
+        
+        // v0.105: Crossfade to next track
+        function radioCrossfadeToNext() {
+            if (!radioNextTrackAudio || radioNextTrackAudio.readyState < 2) {
+                radioNext();
+                return;
+            }
+            
+            const st = stationById(radioCur);
+            if (!st) return;
+            
+            // Start next track
+            radioNextTrackAudio.volume = 0;
+            radioNextTrackAudio.play().catch(() => {});
+            
+            // Fade out current, fade in next over 1.5s
+            const fadeSteps = 15;
+            const fadeInterval = 100; // 1.5s total
+            let step = 0;
+            
+            const fadeTimer = setInterval(() => {
+                step++;
+                const progress = step / fadeSteps;
+                
+                try {
+                    radioAudio.volume = Math.max(0, 1 - progress);
+                    radioNextTrackAudio.volume = Math.min(1, progress);
+                } catch (e) {}
+                
+                if (step >= fadeSteps) {
+                    clearInterval(fadeTimer);
+                    
+                    // Swap audio elements
+                    const tempAudio = radioAudio;
+                    radioAudio.src = radioNextTrackAudio.src;
+                    radioAudio.currentTime = radioNextTrackAudio.currentTime;
+                    radioAudio.volume = 1;
+                    radioAudio.play().catch(() => {});
+                    
+                    // Clean up
+                    radioNextTrackAudio.pause();
+                    radioNextTrackAudio.src = '';
+                    
+                    // Advance track index
+                    radioTrackIdx = (radioTrackIdx + 1) % st.tracks.length;
+                    radioPos[radioCur] = radioOrderForSid(st, radioCur)[radioTrackIdx];
+                    saveRadioState();
+                    
+                    // Update display
+                    const tr = radioTrackAt(st, radioCur, radioTrackIdx);
+                    const now = document.getElementById('radio-now');
+                    const synced = radioIsSynced(radioCur);
+                    if (now) now.innerText = (synced ? 'LIVE · ' : '') + st.name + ' :: ' + tr.a + ' — ' + tr.t;
+                    renderRadioTab();
+                    
+                    // Re-setup event handlers
+                    radioAudio.onended = synced ? () => radioSyncBoundary(0)
+                                                : () => {
+                                                    if (radioNextTrackAudio && radioNextTrackAudio.readyState >= 2) {
+                                                        radioCrossfadeToNext();
+                                                    } else {
+                                                        radioStatic(550);
+                                                        radioNext();
+                                                    }
+                                                };
+                    
+                    // Schedule next preload
+                    scheduleNextTrackPreload(st, synced);
+                }
+            }, fadeInterval);
         }
 
         function radioNext() {
@@ -7293,24 +7414,77 @@
             saveRadioState();
             radioPlayCurrent(pos.seek);
         }
-        // 5s drift watchdog: full rejoin when the shared playhead is on another track (covers
-        // overseer SKIP), hard punch only past 1.5s adrift so there's no constant micro-stutter.
+        // v0.105: 3s drift watchdog with tighter 0.8s tolerance + manual offset support
         function radioSyncWatchdog() {
             if (radioSyncTimer) { clearInterval(radioSyncTimer); radioSyncTimer = null; }
-            if (!radioCur || !radioIsSynced(radioCur)) return;
+            if (!radioCur || !radioIsSynced(radioCur)) {
+                document.getElementById('radio-sync-controls').style.display = 'none';
+                return;
+            }
+            document.getElementById('radio-sync-controls').style.display = 'block';
             radioSyncTimer = setInterval(() => {
                 if (!radioCur || !radioIsSynced(radioCur)) { clearInterval(radioSyncTimer); radioSyncTimer = null; return; }
                 const pos = radioLivePos(radioCur);
                 if (!pos) return;
                 if (pos.idx !== radioTrackIdx) { radioJoinLive(false); return; }
-                try { if (Math.abs((radioAudio.currentTime || 0) - pos.seek) > 1.5) radioAudio.currentTime = pos.seek; } catch (e) {}
-            }, 5000);
+                
+                // v0.105: Apply manual offset and use tighter tolerance
+                const targetSeek = pos.seek + radioLocalOffset;
+                const currentSeek = radioAudio.currentTime || 0;
+                const drift = Math.abs(currentSeek - targetSeek);
+                
+                // Update sync indicator
+                updateSyncIndicator(drift);
+                
+                // Correct if drift exceeds 0.8s (tighter than old 1.5s)
+                try { 
+                    if (drift > 0.8) {
+                        radioAudio.currentTime = Math.max(0, Math.min(targetSeek, (radioAudio.duration || targetSeek) - 0.1));
+                    }
+                } catch (e) {}
+            }, 3000);  // v0.105: check every 3s instead of 5s
         }
         function radioSyncToggle() {
             radioSyncOn = !radioSyncOn;
             localStorage.setItem('pipboy-radio-sync', radioSyncOn ? 'on' : 'off');
             if (radioCur) radioStop(); // clean re-tune under the new mode
             renderRadioTab(); // v0.56: the button label + HUD glyph say it -- toast culled per user
+        }
+        
+        // v0.105: Update sync indicator display
+        function updateSyncIndicator(drift) {
+            const indicator = document.getElementById('radio-sync-indicator');
+            if (!indicator) return;
+            
+            const driftStr = drift.toFixed(1);
+            let color = '#39ff14'; // green for <1s
+            if (drift >= 1.0 && drift < 2.0) color = '#ffb642'; // amber for 1-2s
+            else if (drift >= 2.0) color = '#ff3333'; // red for >2s
+            
+            indicator.textContent = `SYNC ±${driftStr}s`;
+            indicator.style.color = color;
+            indicator.style.textShadow = `0 0 5px ${color}`;
+        }
+        
+        // v0.105: Manual sync adjustment ±0.1s
+        function radioSyncAdjust(delta) {
+            radioLocalOffset += delta;
+            // Clamp to reasonable range ±5s
+            radioLocalOffset = Math.max(-5, Math.min(5, radioLocalOffset));
+            localStorage.setItem('pipboy-radio-offset', radioLocalOffset.toString());
+            
+            // Immediately apply the adjustment
+            if (radioCur && radioIsSynced(radioCur)) {
+                const pos = radioLivePos(radioCur);
+                if (pos) {
+                    const targetSeek = pos.seek + radioLocalOffset;
+                    try {
+                        radioAudio.currentTime = Math.max(0, Math.min(targetSeek, (radioAudio.duration || targetSeek) - 0.1));
+                    } catch (e) {}
+                }
+            }
+            
+            showNotification(`SYNC OFFSET: ${radioLocalOffset >= 0 ? '+' : ''}${radioLocalOffset.toFixed(1)}s`);
         }
         // Satellite listeners; deferred until window.db exists (same retry shape as initComms).
         function initRadioSync(tries) {
