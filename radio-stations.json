@@ -659,7 +659,7 @@
    "id": "unknown",
    "name": "UNKNOWN TRANSMISSION",
    "item": "pox-radio-unknown",
-   "base": "https://archive.org/download/unknown_20260817_2203/Unknown",
+   "base": "https://pox-alt-radio.netlify.app/unknown",
    "tracks": [
     {
      "t": "ALL THE THINGS SHE SAID",
@@ -779,7 +779,7 @@
    "id": "waste",
    "name": "W.A.S.T.E FM",
    "item": "pox-radio-waste",
-   "base": "https://archive.org/download/waste_202608",
+   "base": "https://pox-alt-radio.netlify.app/waste",
    "tracks": [
     {
      "t": "RAINING BLOOD SLAYER, ORCHESTRAL ARRANGEMENT NO 2",

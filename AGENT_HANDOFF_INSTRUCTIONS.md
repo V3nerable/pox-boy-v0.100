@@ -252,3 +252,5 @@ flag writes (claimed/declined/fulfilled on mail letters) pass these validators.
 
 *   **v0.101:** RADIO STATIONS INTEGRATION — added W.A.S.T.E FM and Unknown Transmission stations from Archive.org. W.A.S.T.E FM: 11 tracks (all Slayer "Raining Blood" variations, 19.9M total) from https://archive.org/details/waste_202608. Unknown Transmission: 16 tracks (nightcore versions, 21.4M total) from https://archive.org/details/unknown_20260817_2203. Updated `radio-stations.json` with proper base URLs (`https://archive.org/download/waste_202608` and `https://archive.org/download/unknown_20260817_2203/Unknown`), track metadata (title, artist, filename, bytes, estimated duration), and file structure. Radio tab now shows all 5 stations (GNR, DCR, APPA, W.A.S.T.E, Unknown). Cache bumped to pipboy-cache-v90.
 
+*   **v0.103:** RADIO URL FIX — updated W.A.S.T.E FM and Unknown Transmission base URLs from `pox-radio.netlify.app` to `pox-alt-radio.netlify.app` (user deployed to alt site). Radio tab now streams from correct Netlify site with CORS headers. Cache bumped to pipboy-cache-v92.
+
