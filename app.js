@@ -1807,7 +1807,7 @@
         let firebaseQuests = {}; // Firebase firebaseQuests data
 
         function switchQuestTab(tabId) {
-            const tabs = ['active', 'available', 'issued', 'verified'];
+            const tabs = ['active', 'completed', 'available', 'issued', 'verified'];
             tabs.forEach(t => {
                 const navItem = document.querySelector(`#quest-sub-nav .sub-nav-item:nth-child(${tabs.indexOf(t) + 1})`);
                 const content = document.getElementById('quest-tab-' + t);
@@ -1820,6 +1820,7 @@
                 }
             });
             if (tabId === 'active') renderActiveQuests();
+            else if (tabId === 'completed') renderCompletedQuests();
             else if (tabId === 'available') renderAvailableQuests();
             else if (tabId === 'issued') renderIssuedQuests();
             else if (tabId === 'verified') renderVerifiedQuests();
@@ -1859,6 +1860,47 @@
             });
 
             container.innerHTML = html.length ? html.join('') : '<p style="text-align:center; opacity:0.5;">NO ACTIVE QUESTS</p>';
+        }
+
+        function renderCompletedQuests() {
+            const container = document.getElementById('quest-tab-completed');
+            if (!container) return;
+            const myUid = localStorage.getItem('pipboy-uid');
+            const html = [];
+
+            // Legacy local quests (completed, expired, or abandoned)
+            quests.forEach(q => {
+                if (!q.completed && !q.expired && !q.abandoned) return;
+                const statusText = q.completed ? '✓ COMPLETED' : q.expired ? '⏰ EXPIRED' : '✗ ABANDONED';
+                const borderColor = q.completed ? '#39ff14' : q.expired ? '#ffb642' : '#ff3333';
+                html.push(`<div class="item-row" style="border-color:${borderColor}; opacity:0.6;" onclick="openQuestActionModal('${q.id}')">
+                    <div style="font-weight:bold; text-decoration:line-through;">${escapeHtml(q.name)}</div>
+                    <div style="font-size:0.85rem; opacity:0.7;">${escapeHtml(q.giver || 'UNKNOWN')}</div>
+                    <div style="font-size:0.85rem; color:${borderColor};">${statusText}</div>
+                </div>`);
+            });
+
+            // Firebase quests with completed/rejected status (not verified)
+            Object.keys(firebaseQuests).forEach(id => {
+                const q = firebaseQuests[id];
+                const prog = q.progress && q.progress[myUid];
+                if (!prog || prog.status === 'verified' || prog.status === 'accepted') return;
+                
+                const statusText = prog.status === 'completed' ? '⏳ AWAITING VERIFICATION' : 
+                                   prog.status === 'rejected' ? '✗ REJECTED' : prog.status.toUpperCase();
+                const borderColor = prog.status === 'completed' ? '#ffb642' : '#ff3333';
+                const opacity = prog.status === 'rejected' ? '0.5' : '0.7';
+                
+                html.push(`<div class="item-row" style="border-color:${borderColor}; opacity:${opacity};" onclick="openQuestModal('${id}')">
+                    <div style="font-weight:bold; text-decoration:line-through;">${escapeHtml(q.title)}</div>
+                    <div style="font-size:0.85rem; opacity:0.7;">${q.type.toUpperCase()} — ${escapeHtml(q.issuerName || 'UNKNOWN')}</div>
+                    <div style="font-size:0.85rem; color:${borderColor};">${statusText}</div>
+                    ${prog.rejectedAt ? `<div style="font-size:0.75rem; opacity:0.6;">Rejected: ${new Date(prog.rejectedAt).toLocaleString()}</div>` : ''}
+                    ${q.reward ? `<div style="font-size:0.85rem; color:#5fc98e;">REWARD: ${escapeHtml(q.reward)}</div>` : ''}
+                </div>`);
+            });
+
+            container.innerHTML = html.length ? html.join('') : '<p style="text-align:center; opacity:0.5;">NO COMPLETED QUESTS</p>';
         }
 
         function renderAvailableQuests() {
@@ -2272,33 +2314,43 @@
         }
 
         function completeQuest(id) {
-            const myUid = localStorage.getItem('pipboy-uid');
-            const myName = userProfile.name || 'UNKNOWN';
-            const q = firebaseQuests[id];
-            const updates = {
-                status: 'completed',
-                completedAt: Date.now(),
-                completedByName: myName
-            };
-            if (window.pendingQuestPhoto && window.pendingQuestPhoto.questId === id) {
-                updates.evidencePhoto = window.pendingQuestPhoto.photo;
-                window.pendingQuestPhoto = null;
+            try {
+                const myUid = localStorage.getItem('pipboy-uid');
+                const myName = userProfile.name || 'UNKNOWN';
+                const q = firebaseQuests[id];
+                if (!q) {
+                    showNotification('ERROR: Quest not found');
+                    return;
+                }
+                const updates = {
+                    status: 'completed',
+                    completedAt: Date.now(),
+                    completedByName: myName
+                };
+                if (window.pendingQuestPhoto && window.pendingQuestPhoto.questId === id) {
+                    updates.evidencePhoto = window.pendingQuestPhoto.photo;
+                    window.pendingQuestPhoto = null;
+                }
+                const progRef = window.firebaseRef(window.db, `quests/${id}/progress/${myUid}`);
+                window.firebaseUpdate(progRef, updates)
+                    .then(() => {
+                        closeCustomPrompt();
+                        showNotification('QUEST COMPLETED - AWAITING VERIFICATION');
+                        // Send verify-request mail to issuer
+                        if (q.issuerUid) {
+                            queueMail(q.issuerUid, 'verify-request', {
+                                questId: id,
+                                title: q.title,
+                                completedByName: myName,
+                                evidencePhoto: updates.evidencePhoto
+                            }, 'VERIFY: ' + q.title + ' COMPLETED BY ' + myName);
+                        }
+                        switchQuestTab('active');
+                    })
+                    .catch(err => showNotification('ERROR: ' + err.message));
+            } catch (err) {
+                showNotification('ERROR COMPLETING QUEST: ' + err.message);
             }
-            const progRef = window.firebaseRef(window.db, `quests/${id}/progress/${myUid}`);
-            window.firebaseUpdate(progRef, updates)
-                .then(() => {
-                    closeCustomPrompt();
-                    showNotification('QUEST COMPLETED - AWAITING VERIFICATION');
-                    // Send verify-request mail to issuer
-                    queueMail(q.issuerUid, 'verify-request', {
-                        questId: id,
-                        title: q.title,
-                        completedByName: myName,
-                        evidencePhoto: updates.evidencePhoto
-                    }, 'VERIFY: ' + q.title + ' COMPLETED BY ' + myName);
-                    switchQuestTab('active');
-                })
-                .catch(err => showNotification('ERROR: ' + err.message));
         }
 
         function verifyQuest(id, uid) {
@@ -2349,13 +2401,13 @@
                 { label: 'REJECT', color: '#ff3333', action: () => {
                     const progRef = window.firebaseRef(window.db, `quests/${id}/progress/${uid}`);
                     window.firebaseUpdate(progRef, {
-                        status: 'rejected',
+                        status: 'accepted',
                         rejectedBy: myUid,
                         rejectedAt: Date.now()
                     })
                         .then(() => {
                             closeCustomPrompt();
-                            showNotification('COMPLETION REJECTED');
+                            showNotification('COMPLETION REJECTED - QUEST RETURNED TO ACTIVE');
                             renderIssuedQuests();
                         })
                         .catch(err => showNotification('ERROR: ' + err.message));
@@ -2806,7 +2858,9 @@
             if (q.completed) {
                 toggleBtn.style.display = 'block';
                 toggleBtn.innerText = "MARK AS INCOMPLETE";
-                abandonBtn.style.display = 'none';
+                abandonBtn.style.display = 'block';
+                abandonBtn.innerText = "REMOVE QUEST";
+                abandonBtn.onclick = executeQuestRemove;
             } else if (q.abandoned) {
                 toggleBtn.style.display = 'none';
                 abandonBtn.style.display = 'block';
