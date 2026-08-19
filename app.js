@@ -1123,7 +1123,13 @@
             }
             if (tabId === 'map') {
                 // Leaflet needs to calculate size AFTER display block is applied
-                setTimeout(initPipMap, 50); 
+                setTimeout(() => {
+                    initPipMap();
+                    // v0.106: Auto-center on user when opening MAP tab
+                    setTimeout(() => {
+                        if (typeof mapGoMe === 'function') mapGoMe();
+                    }, 100);
+                }, 50); 
             }
             if (tabId === 'cam') {
                 renderPhotoGallery();
@@ -1894,6 +1900,12 @@
             Object.keys(firebaseQuests).forEach(id => {
                 const q = firebaseQuests[id];
                 if (q.issuerUid !== myUid && !isDev) return;
+                
+                // v0.106: Handle cancelled status with strikethrough
+                const isCancelled = q.status === 'cancelled';
+                const textDecoration = isCancelled ? 'line-through' : 'none';
+                const opacity = isCancelled ? '0.5' : '1';
+                
                 const pendingVerifications = [];
                 if (q.progress) {
                     Object.keys(q.progress).forEach(uid => {
@@ -1903,11 +1915,11 @@
                     });
                 }
                 const pendingCount = pendingVerifications.length;
-                const borderColor = pendingCount > 0 ? '#ffb642' : 'var(--pip-color-dim)';
-                html.push(`<div class="item-row" style="border-color:${borderColor};" onclick="openIssuedQuestModal('${id}')">
-                    <div style="font-weight:bold;">${escapeHtml(q.title)}</div>
-                    <div style="font-size:0.85rem; opacity:0.7;">${q.type.toUpperCase()} — ${q.status === 'open' ? 'OPEN' : q.status.toUpperCase()}</div>
-                    ${pendingCount > 0 ? `<div style="font-size:0.85rem; color:#ffb642;">⏳ ${pendingCount} PENDING VERIFICATION${pendingCount > 1 ? 'S' : ''}</div>` : ''}
+                const borderColor = isCancelled ? 'var(--pip-color-dim)' : (pendingCount > 0 ? '#ffb642' : 'var(--pip-color-dim)');
+                html.push(`<div class="item-row" style="border-color:${borderColor}; opacity:${opacity};" onclick="openIssuedQuestModal('${id}')">
+                    <div style="font-weight:bold; text-decoration:${textDecoration};">${escapeHtml(q.title)}</div>
+                    <div style="font-size:0.85rem; opacity:0.7; text-decoration:${textDecoration};">${q.type.toUpperCase()} — ${q.status.toUpperCase()}</div>
+                    ${!isCancelled && pendingCount > 0 ? `<div style="font-size:0.85rem; color:#ffb642;">⏳ ${pendingCount} PENDING VERIFICATION${pendingCount > 1 ? 'S' : ''}</div>` : ''}
                 </div>`);
             });
 
