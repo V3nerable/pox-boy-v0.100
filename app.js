@@ -2113,34 +2113,38 @@
         }
 
         function openQuestModal(id) {
-            const q = firebaseQuests[id];
-            if (!q) {
-                showNotification('QUEST NOT FOUND');
-                return;
-            }
-            const myUid = localStorage.getItem('pipboy-uid');
-            const prog = q.progress && q.progress[myUid];
-            const isAccepted = prog && prog.status !== 'rejected';
-            const isCompleted = prog && prog.status === 'completed';
-            const isVerified = prog && prog.status === 'verified';
-            const buttons = [];
-            if (!isAccepted && q.type !== 'direct') {
-                buttons.push({ label: 'ACCEPT QUEST', action: () => acceptQuest(id) });
-            } else if (isAccepted && !isCompleted) {
-                buttons.push({ label: 'ATTACH PHOTO EVIDENCE', action: () => attachPhotoToQuest(id) });
-                if (q.type === 'bounty') {
-                    buttons.push({ label: 'SCAN TARGET DATACARD', action: () => scanBountyTarget(id) });
-                } else {
-                    buttons.push({ label: 'COMPLETE QUEST', action: () => completeQuest(id) });
+            try {
+                const q = firebaseQuests[id];
+                if (!q) {
+                    showNotification('QUEST NOT FOUND - ID: ' + id);
+                    return;
                 }
+                const myUid = localStorage.getItem('pipboy-uid');
+                const prog = q.progress && q.progress[myUid];
+                const isAccepted = prog && prog.status !== 'rejected';
+                const isCompleted = prog && prog.status === 'completed';
+                const isVerified = prog && prog.status === 'verified';
+                const buttons = [];
+                if (!isAccepted && q.type !== 'direct') {
+                    buttons.push({ label: 'ACCEPT QUEST', action: () => acceptQuest(id) });
+                } else if (isAccepted && !isCompleted) {
+                    buttons.push({ label: 'ATTACH PHOTO EVIDENCE', action: () => attachPhotoToQuest(id) });
+                    if (q.type === 'bounty') {
+                        buttons.push({ label: 'SCAN TARGET DATACARD', action: () => scanBountyTarget(id) });
+                    } else {
+                        buttons.push({ label: 'COMPLETE QUEST', action: () => completeQuest(id) });
+                    }
+                }
+                buttons.push({ label: 'CLOSE', action: () => {} });
+                const typeLabel = q.type === 'global' ? '🌍 GLOBAL' : q.type === 'bounty' ? '☠ BOUNTY' : '📋 DIRECT';
+                const statusText = isVerified ? '✓ VERIFIED' : isCompleted ? '⏳ AWAITING VERIFICATION' : isAccepted ? 'ACTIVE' : 'NOT ACCEPTED';
+                const targetLine = q.type === 'bounty' ? `\nTARGET: ${escapeHtml(q.targetName || 'UNKNOWN')}` : '';
+                const desc = q.description ? `\n\n${escapeHtml(q.description)}` : '';
+                const rewardLine = q.reward ? `\n\nREWARD: ${escapeHtml(q.reward)}` : '';
+                showCustomPrompt(`${typeLabel}\n${escapeHtml(q.title)}${desc}${targetLine}${rewardLine}\n\nSTATUS: ${statusText}\nISSUED BY: ${escapeHtml(q.issuerName || 'UNKNOWN')}`, buttons);
+            } catch (err) {
+                showNotification('ERROR OPENING QUEST: ' + err.message);
             }
-            buttons.push({ label: 'CLOSE', action: () => {} });
-            const typeLabel = q.type === 'global' ? '🌍 GLOBAL' : q.type === 'bounty' ? '☠ BOUNTY' : '📋 DIRECT';
-            const statusText = isVerified ? '✓ VERIFIED' : isCompleted ? '⏳ AWAITING VERIFICATION' : isAccepted ? 'ACTIVE' : 'NOT ACCEPTED';
-            const targetLine = q.type === 'bounty' ? `\nTARGET: ${escapeHtml(q.targetName || 'UNKNOWN')}` : '';
-            const desc = q.description ? `\n\n${escapeHtml(q.description)}` : '';
-            const rewardLine = q.reward ? `\n\nREWARD: ${escapeHtml(q.reward)}` : '';
-            showCustomPrompt(`${typeLabel}\n${escapeHtml(q.title)}${desc}${targetLine}${rewardLine}\n\nSTATUS: ${statusText}\nISSUED BY: ${escapeHtml(q.issuerName || 'UNKNOWN')}`, buttons);
         }
 
         function openIssuedQuestModal(id) {

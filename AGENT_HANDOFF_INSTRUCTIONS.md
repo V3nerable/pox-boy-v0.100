@@ -266,3 +266,5 @@ flag writes (claimed/declined/fulfilled on mail letters) pass these validators.
 
 *   **v0.109:** CRITICAL FIX - BLANK SCREEN. Root cause: Python script duplicated error handling code in `openQuestModal()` function, causing "Identifier 'q' has already been declared" syntax error that prevented app from loading. Removed duplicate lines 2121-2125. Cache bumped to pipboy-cache-v98.
 
+*   **v0.110:** QUEST BUTTON FIX + QUEST MODAL ERROR HANDLING. (1) **BUTTON FIX:** Restored NEW [+ CREATE QUEST] button (unified quest system with type selection) in QUESTS tab. Removed OLD [+ ADD QUEST] button (legacy quest system) from bottom bar. (2) **QUEST MODAL ERROR HANDLING:** Added try-catch wrapper to `openQuestModal()` with detailed error notifications. Now shows "QUEST NOT FOUND - ID: xxx" if quest doesn't exist, and "ERROR OPENING QUEST: xxx" if any exception occurs. This helps debug why quests might not be opening. Cache bumped to pipboy-cache-v99.
+
