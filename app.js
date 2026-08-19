@@ -1166,7 +1166,7 @@
             } else if (parentTab === 'data') {
                 // v0.70: DATA sub-tabs are now QUESTS / CONTRACTS / WASTELANDERS (FACTIONS moved to STAT)
                 currentDataTab = subTabId;
-                document.getElementById('add-quest-btn').style.display = (subTabId === 'quests' && isDev) ? 'inline-block' : 'none';
+                // v0.110: add-quest-btn removed (legacy system), using openCreateQuestModal button instead
                 const devBtns = document.getElementById('dev-controls'); if (devBtns && subTabId !== '_mail') devBtns.style.display = (currentStatTab === 'stats' && document.getElementById('tab-stat').classList.contains('active')) ? 'flex' : 'none';
 
                 document.getElementById(`tab-${parentTab}`).querySelectorAll('.sub-tab-content').forEach(el => el.classList.remove('active'));
@@ -2162,6 +2162,10 @@
             else if (q.issuerUid === myUid && q.status !== 'cancelled' && q.status !== 'removed') {
                 buttons.push({ label: 'CANCEL QUEST (HAS PROGRESS)', color: '#ff3333', action: () => cancelQuest(id) });
             }
+            // v0.110: Allow issuer to uncancel cancelled quests
+            if (q.issuerUid === myUid && q.status === 'cancelled') {
+                buttons.push({ label: 'UNCANCEL QUEST', color: '#39ff14', action: () => uncancelQuest(id) });
+            }
             // v0.107: Allow overseer to remove any quest
             if (isDev && q.status !== 'removed') {
                 buttons.push({ label: 'REMOVE QUEST (OVERSEER)', color: '#ff6600', action: () => removeQuest(id) });
@@ -2210,9 +2214,11 @@
                 .then(() => {
                     closeCustomPrompt();
                     showNotification('QUEST ACCEPTED');
-                    // Refresh the active quests tab
-                    switchQuestTab('active');
-                    renderActiveQuests();
+                    // Refresh the active quests tab after a short delay to allow Firebase listener to fire
+                    setTimeout(() => {
+                        switchQuestTab('active');
+                        renderActiveQuests();
+                    }, 500);
                 })
                 .catch(err => showNotification('ERROR: ' + err.message));
         }
@@ -2325,6 +2331,23 @@
                         .then(() => {
                             closeCustomPrompt();
                             showNotification('QUEST CANCELLED');
+                            renderIssuedQuests();
+                        })
+                        .catch(err => showNotification('ERROR: ' + err.message));
+                }},
+                { label: 'BACK', color: 'var(--pip-color-dim)', action: () => {} }
+            ]);
+        }
+        
+        // v0.110: Uncancel a cancelled quest
+        function uncancelQuest(id) {
+            showCustomPrompt('UNCANCEL THIS QUEST?', [
+                { label: 'UNCANCEL QUEST', color: '#39ff14', action: () => {
+                    const questRef = window.firebaseRef(window.db, `quests/${id}`);
+                    window.firebaseUpdate(questRef, { status: 'open' })
+                        .then(() => {
+                            closeCustomPrompt();
+                            showNotification('QUEST UNCANCELLED');
                             renderIssuedQuests();
                         })
                         .catch(err => showNotification('ERROR: ' + err.message));
