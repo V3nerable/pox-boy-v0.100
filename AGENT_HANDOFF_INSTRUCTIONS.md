@@ -270,3 +270,5 @@ flag writes (claimed/declined/fulfilled on mail letters) pass these validators.
 
 *   **v0.111:** WASTELANDERS FIX + UNCANCEL QUEST + ACCEPT QUEST FIX. (1) **WASTELANDERS TAB FIX:** Removed reference to deleted `add-quest-btn` element in `switchSubTab()` function that was causing JavaScript error when switching to wastelanders tab. (2) **UNCANCEL QUEST:** Added `uncancelQuest()` function and UNCANCEL button in `openIssuedQuestModal()` for cancelled quests (issuer only). Changes status from 'cancelled' back to 'open'. (3) **ACCEPT QUEST FIX:** Added 500ms delay before refreshing active quests tab after accepting, allowing Firebase listener time to fire and update local `firebaseQuests` object. Cache bumped to pipboy-cache-v100.
 
+*   **v0.112:** CRITICAL FIX - MAP BLANK + QUEST ACCEPTANCE. Root cause: Line 1108 in `switchMainTab()` referenced deleted `add-quest-btn` element without null guard, causing JavaScript error that broke entire function. This prevented map initialization and quest tab switching. Fix: Removed the reference to deleted element. This should restore map functionality and fix quest acceptance flow. Cache bumped to pipboy-cache-v101.
+

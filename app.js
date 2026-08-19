@@ -1105,7 +1105,7 @@
 
             // Button Visibility Logic (v0.53: INV retired; dev console lives under STAT > STATS)
             const aib = document.getElementById('add-item-btn'); if (aib) aib.style.display = 'none';
-            document.getElementById('add-quest-btn').style.display = (tabId === 'data' && currentDataTab === 'quests' && isDev) ? 'inline-block' : 'none';
+            // v0.111: add-quest-btn removed (legacy system), using openCreateQuestModal button in QUESTS tab instead
             document.getElementById('faction-controls').style.display = (tabId === 'data' && currentDataTab === 'factions' && isDev) ? 'flex' : 'none';
             document.getElementById('dev-controls').style.display = (tabId === 'stat' && currentStatTab === 'stats') ? 'flex' : 'none';
             
