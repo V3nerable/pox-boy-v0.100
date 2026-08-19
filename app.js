@@ -2342,15 +2342,30 @@
                     showNotification('ERROR: Quest not found');
                     return;
                 }
+                
+                // v0.117: Check if evidence photo is attached
+                const hasEvidence = window.pendingQuestPhoto && window.pendingQuestPhoto.questId === id;
+                
+                if (!hasEvidence) {
+                    // No evidence - show prompt to provide evidence
+                    showCustomPrompt('PROVIDE EVIDENCE\n\nPlease attach a photo as evidence before completing this quest.', [
+                        { label: 'ATTACH PHOTO', action: () => {
+                            closeCustomPrompt();
+                            attachPhotoToQuest(id);
+                        }},
+                        { label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} }
+                    ]);
+                    return;
+                }
+                
                 const updates = {
                     status: 'completed',
                     completedAt: Date.now(),
-                    completedByName: myName
+                    completedByName: myName,
+                    evidencePhoto: window.pendingQuestPhoto.photo
                 };
-                if (window.pendingQuestPhoto && window.pendingQuestPhoto.questId === id) {
-                    updates.evidencePhoto = window.pendingQuestPhoto.photo;
-                    window.pendingQuestPhoto = null;
-                }
+                window.pendingQuestPhoto = null;
+                
                 const progRef = window.firebaseRef(window.db, `quests/${id}/progress/${myUid}`);
                 window.firebaseUpdate(progRef, updates)
                     .then(() => {
@@ -4648,6 +4663,20 @@
                 // v0.43: capture auto-archives BOTH versions instantly -- no separate
                 // save step exists anymore, so 'save' is live by construction
                 archiveShot(canvas);
+
+                // v0.119: Check if we should reopen photo picker after snap
+                if (window.reopenPickerAfterSnap) {
+                    window.reopenPickerAfterSnap = false;
+                    // Switch back to data tab and reopen picker
+                    setTimeout(() => {
+                        switchMainTab('data');
+                        // Reopen the appropriate picker
+                        if (window.pendingQuestPhoto && window.pendingQuestPhoto.questId) {
+                            attachPhotoToQuest(window.pendingQuestPhoto.questId);
+                        }
+                    }, 500);
+                    return;
+                }
 
                 // Freeze on the picture + release the sensor (battery)
                 video.style.display = 'none';
