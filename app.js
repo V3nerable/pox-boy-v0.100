@@ -1880,22 +1880,32 @@
                 </div>`);
             });
 
-            // Firebase quests with completed/rejected status (not verified)
+            // Firebase quests with completed/rejected/verified/abandoned status
             Object.keys(firebaseQuests).forEach(id => {
                 const q = firebaseQuests[id];
                 const prog = q.progress && q.progress[myUid];
-                if (!prog || prog.status === 'verified' || prog.status === 'accepted') return;
+                if (!prog || prog.status === 'accepted') return;
                 
-                const statusText = prog.status === 'completed' ? '⏳ AWAITING VERIFICATION' : 
-                                   prog.status === 'rejected' ? '✗ REJECTED' : prog.status.toUpperCase();
-                const borderColor = prog.status === 'completed' ? '#ffb642' : '#ff3333';
-                const opacity = prog.status === 'rejected' ? '0.5' : '0.7';
+                const isVerified = prog.status === 'verified';
+                const isCompleted = prog.status === 'completed';
+                const isRejected = prog.status === 'rejected';
+                const isAbandoned = prog.status === 'abandoned';
+                
+                const statusText = isVerified ? '✓ VERIFIED' : 
+                                   isCompleted ? '⏳ AWAITING VERIFICATION' : 
+                                   isRejected ? '✗ REJECTED' : 
+                                   isAbandoned ? '✗ ABANDONED' : prog.status.toUpperCase();
+                const borderColor = isVerified ? '#39ff14' : isCompleted ? '#ffb642' : '#ff3333';
+                const opacity = isVerified ? '0.6' : isRejected || isAbandoned ? '0.5' : '0.7';
                 
                 html.push(`<div class="item-row" style="border-color:${borderColor}; opacity:${opacity};" onclick="openQuestModal('${id}')">
                     <div style="font-weight:bold; text-decoration:line-through;">${escapeHtml(q.title)}</div>
                     <div style="font-size:0.85rem; opacity:0.7;">${q.type.toUpperCase()} — ${escapeHtml(q.issuerName || 'UNKNOWN')}</div>
                     <div style="font-size:0.85rem; color:${borderColor};">${statusText}</div>
-                    ${prog.rejectedAt ? `<div style="font-size:0.75rem; opacity:0.6;">Rejected: ${new Date(prog.rejectedAt).toLocaleString()}</div>` : ''}
+                    ${isVerified && prog.verifiedAt ? `<div style="font-size:0.75rem; opacity:0.6;">Verified: ${new Date(prog.verifiedAt).toLocaleString()}</div>` : ''}
+                    ${isRejected && prog.rejectedAt ? `<div style="font-size:0.75rem; opacity:0.6;">Rejected: ${new Date(prog.rejectedAt).toLocaleString()}</div>` : ''}
+                    ${isAbandoned && prog.abandonedAt ? `<div style="font-size:0.75rem; opacity:0.6;">Abandoned: ${new Date(prog.abandonedAt).toLocaleString()}</div>` : ''}
+                    ${prog.evidencePhoto ? `<div style="font-size:0.75rem; color:#ffb642;">📷 Evidence attached</div>` : ''}
                     ${q.reward ? `<div style="font-size:0.85rem; color:#5fc98e;">REWARD: ${escapeHtml(q.reward)}</div>` : ''}
                 </div>`);
             });
@@ -1978,28 +1988,11 @@
         }
 
         function renderVerifiedQuests() {
+            // v0.116: Verified quests now appear in COMPLETED tab
+            // This tab is kept for backwards compatibility but shows message
             const container = document.getElementById('quest-tab-verified');
             if (!container) return;
-            const myUid = localStorage.getItem('pipboy-uid');
-            const html = [];
-
-            // Firebase quests I've completed and been verified for
-            Object.keys(firebaseQuests).forEach(id => {
-                const q = firebaseQuests[id];
-                const prog = q.progress && q.progress[myUid];
-                if (!prog || prog.status !== 'verified') return;
-                
-                html.push(`<div class="item-row" style="border-color:#39ff14; opacity:0.6;" onclick="openQuestModal('${id}')">
-                    <div style="font-weight:bold; text-decoration:line-through;">${escapeHtml(q.title)}</div>
-                    <div style="font-size:0.85rem; opacity:0.7;">${q.type.toUpperCase()} — ${escapeHtml(q.issuerName || 'UNKNOWN')}</div>
-                    <div style="font-size:0.85rem; color:#39ff14;">✓ VERIFIED</div>
-                    ${prog.verifiedAt ? `<div style="font-size:0.75rem; opacity:0.6;">Verified: ${new Date(prog.verifiedAt).toLocaleString()}</div>` : ''}
-                    ${prog.evidencePhoto ? `<div style="font-size:0.75rem; color:#ffb642;">📷 Evidence attached</div>` : ''}
-                    ${q.reward ? `<div style="font-size:0.85rem; color:#5fc98e;">REWARD: ${escapeHtml(q.reward)}</div>` : ''}
-                </div>`);
-            });
-
-            container.innerHTML = html.length ? html.join('') : '<p style="text-align:center; opacity:0.5;">NO VERIFIED QUESTS</p>';
+            container.innerHTML = '<p style="text-align:center; opacity:0.5;">VERIFIED QUESTS NOW APPEAR IN COMPLETED TAB</p>';
         }
 
         function openCreateQuestModal() {
@@ -2205,16 +2198,20 @@
                 
                 const buttons = [];
                 if (!isAccepted && q.type !== 'direct') {
+                    // Not accepted yet - show accept button
                     buttons.push({ label: 'ACCEPT QUEST', action: () => acceptQuest(id) });
-                } else if (isAccepted && !isCompleted) {
+                } else if (isAccepted && !isCompleted && !isVerified) {
+                    // Accepted but not completed - show action buttons
                     buttons.push({ label: 'ATTACH PHOTO EVIDENCE', action: () => attachPhotoToQuest(id) });
                     if (q.type === 'bounty') {
                         buttons.push({ label: 'SCAN TARGET DATACARD', action: () => scanBountyTarget(id) });
                     } else {
                         buttons.push({ label: 'COMPLETE QUEST', action: () => completeQuest(id) });
                     }
-                } else if (isCompleted && prog.evidencePhoto) {
-                    // v0.114: Allow viewing evidence photo for completed quests
+                    // v0.116: Allow self-reject/abandon
+                    buttons.push({ label: 'ABANDON QUEST', color: '#ff3333', action: () => abandonQuest(id) });
+                } else if ((isCompleted || isVerified) && prog.evidencePhoto) {
+                    // Completed or verified - only allow viewing evidence (read-only)
                     buttons.push({ label: 'VIEW EVIDENCE PHOTO', action: () => viewEvidencePhoto(prog.evidencePhoto) });
                 }
                 buttons.push({ label: 'CLOSE', action: () => {} });
@@ -2311,6 +2308,29 @@
                     }, 500);
                 })
                 .catch(err => showNotification('ERROR: ' + err.message));
+        }
+
+        function abandonQuest(id) {
+            showCustomPrompt('ABANDON THIS QUEST?\n\nThis will remove it from your active quests.', [
+                { label: 'ABANDON QUEST', color: '#ff3333', action: () => {
+                    const myUid = localStorage.getItem('pipboy-uid');
+                    const progRef = window.firebaseRef(window.db, `quests/${id}/progress/${myUid}`);
+                    window.firebaseUpdate(progRef, {
+                        status: 'abandoned',
+                        abandonedAt: Date.now()
+                    })
+                        .then(() => {
+                            closeCustomPrompt();
+                            showNotification('QUEST ABANDONED');
+                            setTimeout(() => {
+                                switchQuestTab('active');
+                                renderActiveQuests();
+                            }, 500);
+                        })
+                        .catch(err => showNotification('ERROR: ' + err.message));
+                }},
+                { label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} }
+            ]);
         }
 
         function completeQuest(id) {
