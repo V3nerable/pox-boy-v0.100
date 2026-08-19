@@ -134,12 +134,15 @@
         "type":          { ".validate": "newData.isString() && (newData.val() == 'direct' || newData.val() == 'global' || newData.val() == 'bounty')" },
         "issuerUid":     { ".validate": "newData.isString() && newData.val().length <= 64" },
         "issuerName":    { ".validate": "newData.isString() && newData.val().length <= 32" },
-        "status":        { ".validate": "newData.isString() && (newData.val() == 'open' || newData.val() == 'cancelled')" },
+        "status":        { ".validate": "newData.isString() && (newData.val() == 'open' || newData.val() == 'cancelled' || newData.val() == 'removed')" },
         "assignedTo":    { ".validate": "newData.isString() && newData.val().length <= 64" },
         "targetUid":     { ".validate": "newData.isString() && newData.val().length <= 64" },
         "targetName":    { ".validate": "newData.isString() && newData.val().length <= 32" },
         "expiresAt":     { ".validate": "newData.isNumber() || newData.val() == null" },
         "createdAt":     { ".validate": "newData.isNumber() && newData.val() > 1735689600000" },
+        "removedReason": { ".validate": "newData.isString() && newData.val().length <= 100" },
+        "removedAt":     { ".validate": "newData.isNumber() || newData.val() == null" },
+        "removedBy":     { ".validate": "newData.isString() && newData.val().length <= 32" },
         "progress": {
           "$uid": {
             ".write": true,
