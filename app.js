@@ -2118,11 +2118,6 @@
                 showNotification('QUEST NOT FOUND');
                 return;
             }
-            const q = firebaseQuests[id];
-            if (!q) {
-                showNotification('QUEST NOT FOUND');
-                return;
-            }
             const myUid = localStorage.getItem('pipboy-uid');
             const prog = q.progress && q.progress[myUid];
             const isAccepted = prog && prog.status !== 'rejected';

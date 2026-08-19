@@ -264,3 +264,5 @@ flag writes (claimed/declined/fulfilled on mail letters) pass these validators.
 
 *   **v0.108:** FIREBASE RULES FIX + UI CLEANUP + QUEST MODAL ERROR HANDLING. (1) **FIREBASE RULES:** Added 'removed' to allowed status values in quests node. Added validators for removedReason (string <=100), removedAt (number/null), removedBy (string <=32) fields. (2) **UI CLEANUP:** Removed standalone [+ CREATE QUEST] button from QUESTS tab (users can still create quests via the ISSUED tab). (3) **QUEST MODAL ERROR HANDLING:** Updated `openQuestModal()` to show "QUEST NOT FOUND" notification if quest doesn't exist in firebaseQuests (helps debug Firebase listener issues). Cache bumped to pipboy-cache-v97.
 
+*   **v0.109:** CRITICAL FIX - BLANK SCREEN. Root cause: Python script duplicated error handling code in `openQuestModal()` function, causing "Identifier 'q' has already been declared" syntax error that prevented app from loading. Removed duplicate lines 2121-2125. Cache bumped to pipboy-cache-v98.
+
