@@ -2114,16 +2114,31 @@
 
         function openQuestModal(id) {
             try {
+                // Debug: confirm function is being called
+                console.log('openQuestModal called with id:', id);
+                
                 const q = firebaseQuests[id];
                 if (!q) {
                     showNotification('QUEST NOT FOUND - ID: ' + id);
+                    console.error('Quest not found in firebaseQuests:', id);
                     return;
                 }
+                
+                console.log('Quest data:', q);
+                
                 const myUid = localStorage.getItem('pipboy-uid');
+                if (!myUid) {
+                    showNotification('ERROR: No user ID found');
+                    return;
+                }
+                
                 const prog = q.progress && q.progress[myUid];
                 const isAccepted = prog && prog.status !== 'rejected';
                 const isCompleted = prog && prog.status === 'completed';
                 const isVerified = prog && prog.status === 'verified';
+                
+                console.log('Quest state:', { isAccepted, isCompleted, isVerified, prog });
+                
                 const buttons = [];
                 if (!isAccepted && q.type !== 'direct') {
                     buttons.push({ label: 'ACCEPT QUEST', action: () => acceptQuest(id) });
@@ -2136,13 +2151,21 @@
                     }
                 }
                 buttons.push({ label: 'CLOSE', action: () => {} });
+                
                 const typeLabel = q.type === 'global' ? '🌍 GLOBAL' : q.type === 'bounty' ? '☠ BOUNTY' : '📋 DIRECT';
                 const statusText = isVerified ? '✓ VERIFIED' : isCompleted ? '⏳ AWAITING VERIFICATION' : isAccepted ? 'ACTIVE' : 'NOT ACCEPTED';
                 const targetLine = q.type === 'bounty' ? `\nTARGET: ${escapeHtml(q.targetName || 'UNKNOWN')}` : '';
                 const desc = q.description ? `\n\n${escapeHtml(q.description)}` : '';
                 const rewardLine = q.reward ? `\n\nREWARD: ${escapeHtml(q.reward)}` : '';
-                showCustomPrompt(`${typeLabel}\n${escapeHtml(q.title)}${desc}${targetLine}${rewardLine}\n\nSTATUS: ${statusText}\nISSUED BY: ${escapeHtml(q.issuerName || 'UNKNOWN')}`, buttons);
+                
+                const promptText = `${typeLabel}\n${escapeHtml(q.title)}${desc}${targetLine}${rewardLine}\n\nSTATUS: ${statusText}\nISSUED BY: ${escapeHtml(q.issuerName || 'UNKNOWN')}`;
+                
+                console.log('Opening prompt with text:', promptText);
+                console.log('Buttons:', buttons);
+                
+                showCustomPrompt(promptText, buttons);
             } catch (err) {
+                console.error('Error in openQuestModal:', err);
                 showNotification('ERROR OPENING QUEST: ' + err.message);
             }
         }
