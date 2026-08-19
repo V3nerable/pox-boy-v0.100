@@ -1902,9 +1902,12 @@
                 if (q.issuerUid !== myUid && !isDev) return;
                 
                 // v0.106: Handle cancelled status with strikethrough
+                // v0.107: Handle removed status with reason display
                 const isCancelled = q.status === 'cancelled';
-                const textDecoration = isCancelled ? 'line-through' : 'none';
-                const opacity = isCancelled ? '0.5' : '1';
+                const isRemoved = q.status === 'removed';
+                const isInactive = isCancelled || isRemoved;
+                const textDecoration = isInactive ? 'line-through' : 'none';
+                const opacity = isRemoved ? '0.4' : (isCancelled ? '0.5' : '1');
                 
                 const pendingVerifications = [];
                 if (q.progress) {
@@ -1915,11 +1918,20 @@
                     });
                 }
                 const pendingCount = pendingVerifications.length;
-                const borderColor = isCancelled ? 'var(--pip-color-dim)' : (pendingCount > 0 ? '#ffb642' : 'var(--pip-color-dim)');
+                const borderColor = isRemoved ? '#ff3333' : (isCancelled ? 'var(--pip-color-dim)' : (pendingCount > 0 ? '#ffb642' : 'var(--pip-color-dim)'));
+                
+                let statusDisplay = q.status.toUpperCase();
+                let reasonDisplay = '';
+                if (isRemoved && q.removedReason) {
+                    statusDisplay = 'REMOVED';
+                    reasonDisplay = `<div style="font-size:0.75rem; color:#ff3333; margin-top:3px;">REASON: ${escapeHtml(q.removedReason)}${q.removedBy ? ' (by ' + escapeHtml(q.removedBy) + ')' : ''}</div>`;
+                }
+                
                 html.push(`<div class="item-row" style="border-color:${borderColor}; opacity:${opacity};" onclick="openIssuedQuestModal('${id}')">
                     <div style="font-weight:bold; text-decoration:${textDecoration};">${escapeHtml(q.title)}</div>
-                    <div style="font-size:0.85rem; opacity:0.7; text-decoration:${textDecoration};">${q.type.toUpperCase()} — ${q.status.toUpperCase()}</div>
-                    ${!isCancelled && pendingCount > 0 ? `<div style="font-size:0.85rem; color:#ffb642;">⏳ ${pendingCount} PENDING VERIFICATION${pendingCount > 1 ? 'S' : ''}</div>` : ''}
+                    <div style="font-size:0.85rem; opacity:0.7; text-decoration:${textDecoration};">${q.type.toUpperCase()} — ${statusDisplay}</div>
+                    ${!isInactive && pendingCount > 0 ? `<div style="font-size:0.85rem; color:#ffb642;">⏳ ${pendingCount} PENDING VERIFICATION${pendingCount > 1 ? 'S' : ''}</div>` : ''}
+                    ${reasonDisplay}
                 </div>`);
             });
 
@@ -2134,8 +2146,18 @@
             const myUid = localStorage.getItem('pipboy-uid');
             const isDev = localStorage.getItem('pipboy-dev-mode') === 'true';
             const buttons = [];
+            
+            // v0.107: Allow issuer to cancel open quests
             if (q.issuerUid === myUid && q.status === 'open') {
                 buttons.push({ label: 'CANCEL QUEST', color: '#ff3333', action: () => cancelQuest(id) });
+            }
+            // v0.107: Allow issuer to cancel accepted quests (with warning)
+            else if (q.issuerUid === myUid && q.status !== 'cancelled' && q.status !== 'removed') {
+                buttons.push({ label: 'CANCEL QUEST (HAS PROGRESS)', color: '#ff3333', action: () => cancelQuest(id) });
+            }
+            // v0.107: Allow overseer to remove any quest
+            if (isDev && q.status !== 'removed') {
+                buttons.push({ label: 'REMOVE QUEST (OVERSEER)', color: '#ff6600', action: () => removeQuest(id) });
             }
             buttons.push({ label: 'CLOSE', action: () => {} });
             const pendingVerifications = [];
@@ -2282,7 +2304,14 @@
         }
 
         function cancelQuest(id) {
-            showCustomPrompt('CANCEL THIS QUEST?', [
+            const q = firebaseQuests[id];
+            const hasProgress = q && q.progress && Object.keys(q.progress).length > 0;
+            
+            const confirmText = hasProgress 
+                ? 'CANCEL THIS QUEST?\n\n⚠️ WARNING: This quest has been accepted by users. Cancelling will affect their progress.'
+                : 'CANCEL THIS QUEST?';
+            
+            showCustomPrompt(confirmText, [
                 { label: 'CANCEL QUEST', color: '#ff3333', action: () => {
                     const questRef = window.firebaseRef(window.db, `quests/${id}`);
                     window.firebaseUpdate(questRef, { status: 'cancelled' })
@@ -2295,6 +2324,38 @@
                 }},
                 { label: 'BACK', color: 'var(--pip-color-dim)', action: () => {} }
             ]);
+        }
+        
+        // v0.107: Overseer can remove any quest with a reason
+        function removeQuest(id) {
+            showCustomPrompt('REMOVE THIS QUEST? (OVERSEER ONLY)\n\nPlease provide a reason for removal:', [
+                { label: 'REMOVE: DUPLICATE', color: '#ff6600', action: () => executeRemoveQuest(id, 'DUPLICATE') },
+                { label: 'REMOVE: INAPPROPRIATE', color: '#ff6600', action: () => executeRemoveQuest(id, 'INAPPROPRIATE') },
+                { label: 'REMOVE: TESTING', color: '#ff6600', action: () => executeRemoveQuest(id, 'TESTING') },
+                { label: 'REMOVE: OTHER', color: '#ff6600', action: () => {
+                    const reason = prompt('Enter removal reason:');
+                    if (reason && reason.trim()) {
+                        executeRemoveQuest(id, reason.trim().toUpperCase());
+                    }
+                }},
+                { label: 'BACK', color: 'var(--pip-color-dim)', action: () => {} }
+            ]);
+        }
+        
+        function executeRemoveQuest(id, reason) {
+            const questRef = window.firebaseRef(window.db, `quests/${id}`);
+            window.firebaseUpdate(questRef, { 
+                status: 'removed',
+                removedReason: reason,
+                removedAt: Date.now(),
+                removedBy: userProfile.name || 'OVERSEER'
+            })
+                .then(() => {
+                    closeCustomPrompt();
+                    showNotification('QUEST REMOVED: ' + reason);
+                    renderIssuedQuests();
+                })
+                .catch(err => showNotification('ERROR: ' + err.message));
         }
 
         function attachPhotoToQuest(id) {
