@@ -5793,7 +5793,7 @@
             } else if (l.type === 'quest') {
                 const p = l.payload || {};
                 showCustomPrompt('QUEST FROM ' + from + ': "' + (p.title || '') + '"' + (p.brief ? ' — ' + p.brief : '') + ' — OBJ: ' + ((p.objectives || []).join(' / ') || 'NONE') + (p.reward ? ' — REWARD: ' + p.reward : ''), [
-                    { label: 'ACCEPT CONTRACT', action: () => acceptQuest(key, l) },
+                    { label: 'ACCEPT CONTRACT', action: () => acceptLegacyQuestFromMail(key, l) },
                     { label: 'DECLINE', color: '#ff3333', action: () => declineLetter(key) }
                 ]);
             } else if (l.type === 'quest-offer') {
@@ -5981,7 +5981,7 @@
             showCustomPrompt(from + ' REPORTS CONTRACT FULFILLED: "' + title + '".' + (myCopy ? ' YOU HOLD AN OPEN COPY OF THIS CONTRACT.' : ''), buttons);
         }
 
-        function acceptQuest(key, l) {
+        function acceptLegacyQuestFromMail(key, l) {
             const p = l.payload || {};
             const objectives = [];
             if (p.brief) objectives.push('BRIEF: ' + p.brief);
