@@ -125,10 +125,7 @@
             { id: 4, name: "DRINK TICKET", type: "aid", effects: "Restores Thirst", quantity: 2, equipped: false }
         ];
         
-        let quests = storedQuests ? JSON.parse(storedQuests) : [
-            { id: 1, name: "THE GATHERING", type: "MAIN", giver: "VAULT-TEC SURVIVORS", location: "VENUE ENTRANCE", timeStr: "--:--", expireTime: null, objectives: ["Find the venue entrance.", "Check in with Overseer."], completed: false, expired: false, abandoned: false },
-            { id: 2, name: "SCAVENGER HUNT", type: "SIDE", giver: "SCAVENGERS GUILD", location: "BAR AREA", timeStr: "23:59", expireTime: new Date().setHours(23, 59, 59, 999), objectives: ["Locate 3 hidden Nuka-Colas", "Return to bartender for prize"], completed: false, expired: false, abandoned: false }
-        ];
+        let quests = storedQuests ? JSON.parse(storedQuests) : [];
 
         let factions = storedFactions ? JSON.parse(storedFactions) : [
             { id: 1, name: "THE WAR BOYS", rep: 25, leader: "Immortan Joe", blurb: "Cult fanatical foot soldiers loyal to the Immortan.", bio: "Raised from birth to serve the Immortan, these pale warriors live half-lives, sustained by bloodbags and the promise of Valhalla.", members: ["Slit", "Nux", "Morsov", "Rictus Erectus"] },
@@ -1810,7 +1807,7 @@
         let firebaseQuests = {}; // Firebase firebaseQuests data
 
         function switchQuestTab(tabId) {
-            const tabs = ['active', 'available', 'issued'];
+            const tabs = ['active', 'available', 'issued', 'verified'];
             tabs.forEach(t => {
                 const navItem = document.querySelector(`#quest-sub-nav .sub-nav-item:nth-child(${tabs.indexOf(t) + 1})`);
                 const content = document.getElementById('quest-tab-' + t);
@@ -1825,6 +1822,7 @@
             if (tabId === 'active') renderActiveQuests();
             else if (tabId === 'available') renderAvailableQuests();
             else if (tabId === 'issued') renderIssuedQuests();
+            else if (tabId === 'verified') renderVerifiedQuests();
         }
 
         function renderActiveQuests() {
@@ -1843,16 +1841,15 @@
                 </div>`);
             });
 
-            // Firebase firebaseQuests I've accepted
+            // Firebase firebaseQuests I've accepted (excluding verified - those go to VERIFIED tab)
             Object.keys(firebaseQuests).forEach(id => {
                 const q = firebaseQuests[id];
                 const prog = q.progress && q.progress[myUid];
-                if (!prog || prog.status === 'rejected') return;
-                const statusText = prog.status === 'completed' ? '⏳ AWAITING VERIFICATION' :
-                                   prog.status === 'verified' ? '✓ VERIFIED' : 'ACTIVE';
+                if (!prog || prog.status === 'rejected' || prog.status === 'verified') return;
+                const statusText = prog.status === 'completed' ? '⏳ AWAITING VERIFICATION' : 'ACTIVE';
                 const strike = prog.status !== 'accepted' ? 'line-through' : 'none';
-                const opacity = prog.status === 'verified' ? '0.6' : prog.status === 'completed' ? '0.7' : '1';
-                const border = prog.status === 'verified' ? '#39ff14' : prog.status === 'completed' ? '#ffb642' : 'var(--pip-color-dim)';
+                const opacity = prog.status === 'completed' ? '0.7' : '1';
+                const border = prog.status === 'completed' ? '#ffb642' : 'var(--pip-color-dim)';
                 html.push(`<div class="item-row" style="border-color:${border}; opacity:${opacity};" onclick="openQuestModal('${id}')">
                     <div style="font-weight:bold; text-decoration:${strike};">${escapeHtml(q.title)}</div>
                     <div style="font-size:0.85rem; opacity:0.7;">${q.type.toUpperCase()} — ${escapeHtml(q.issuerName || 'UNKNOWN')}</div>
@@ -1936,6 +1933,31 @@
             });
 
             container.innerHTML = html.length ? html.join('') : '<p style="text-align:center; opacity:0.5;">NO ISSUED QUESTS</p>';
+        }
+
+        function renderVerifiedQuests() {
+            const container = document.getElementById('quest-tab-verified');
+            if (!container) return;
+            const myUid = localStorage.getItem('pipboy-uid');
+            const html = [];
+
+            // Firebase quests I've completed and been verified for
+            Object.keys(firebaseQuests).forEach(id => {
+                const q = firebaseQuests[id];
+                const prog = q.progress && q.progress[myUid];
+                if (!prog || prog.status !== 'verified') return;
+                
+                html.push(`<div class="item-row" style="border-color:#39ff14; opacity:0.6;" onclick="openQuestModal('${id}')">
+                    <div style="font-weight:bold; text-decoration:line-through;">${escapeHtml(q.title)}</div>
+                    <div style="font-size:0.85rem; opacity:0.7;">${q.type.toUpperCase()} — ${escapeHtml(q.issuerName || 'UNKNOWN')}</div>
+                    <div style="font-size:0.85rem; color:#39ff14;">✓ VERIFIED</div>
+                    ${prog.verifiedAt ? `<div style="font-size:0.75rem; opacity:0.6;">Verified: ${new Date(prog.verifiedAt).toLocaleString()}</div>` : ''}
+                    ${prog.evidencePhoto ? `<div style="font-size:0.75rem; color:#ffb642;">📷 Evidence attached</div>` : ''}
+                    ${q.reward ? `<div style="font-size:0.85rem; color:#5fc98e;">REWARD: ${escapeHtml(q.reward)}</div>` : ''}
+                </div>`);
+            });
+
+            container.innerHTML = html.length ? html.join('') : '<p style="text-align:center; opacity:0.5;">NO VERIFIED QUESTS</p>';
         }
 
         function openCreateQuestModal() {
@@ -2149,6 +2171,9 @@
                     } else {
                         buttons.push({ label: 'COMPLETE QUEST', action: () => completeQuest(id) });
                     }
+                } else if (isCompleted && prog.evidencePhoto) {
+                    // v0.114: Allow viewing evidence photo for completed quests
+                    buttons.push({ label: 'VIEW EVIDENCE PHOTO', action: () => viewEvidencePhoto(prog.evidencePhoto) });
                 }
                 buttons.push({ label: 'CLOSE', action: () => {} });
                 
