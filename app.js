@@ -2550,10 +2550,24 @@
         }
 
         function attachPhotoToQuest(id) {
-            if (!photoArchive.length) { showNotification('DATABANK EMPTY -- TAKE A PHOTO FIRST.'); return; }
             photoPickMode = 'quest-evidence';
             window.pendingQuestPhoto = { questId: id };
             document.getElementById('pp-title').innerText = 'SELECT PHOTO EVIDENCE';
+            
+            if (!photoArchive.length) {
+                // Databank empty - offer to take a photo
+                showCustomPrompt('NO PHOTOS IN DATABANK', [
+                    { label: '📷 TAKE PHOTO NOW', action: () => {
+                        closeCustomPrompt();
+                        snapNowForPicker();
+                    }},
+                    { label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {
+                        window.pendingQuestPhoto = null;
+                    }}
+                ]);
+                return;
+            }
+            
             let html = '<div class="photo-tile-grid">';
             photoArchive.forEach((e, i) => { html += `<div class="photo-tile" onclick="pickPhotoForQuestEvidence(${i})"><img src="${entryPip(e)}"></div>`; });
             document.getElementById('pp-grid').innerHTML = html + '</div>';
@@ -8205,6 +8219,47 @@
                     attribution: '© OpenStreetMap contributors © CARTO'
                 }).addTo(overseerMap);
                 
+                // Add long-press handler for adding markers (like main map)
+                let longPressTimer = null;
+                overseerMap.on('mousedown', function(e) {
+                    longPressTimer = setTimeout(() => {
+                        // Long press detected - add marker at this location
+                        const label = prompt('Enter marker label:', 'NEW MARKER');
+                        if (label && label.trim()) {
+                            const markerData = {
+                                label: label.trim().substring(0, 32),
+                                lat: e.latlng.lat,
+                                lng: e.latlng.lng,
+                                ts: Date.now(),
+                                from: myMailUid,
+                                fromName: userProfile.name || 'OVERSEER'
+                            };
+                            
+                            const key = 'overseer_' + Date.now();
+                            window.firebaseSet(window.firebaseRef(window.db, 'sharedpins/' + key), markerData)
+                                .then(() => {
+                                    showNotification('MARKER ADDED: ' + label);
+                                    setTimeout(() => updateOverseerDisplay(), 500);
+                                })
+                                .catch(err => showNotification('ERROR: ' + err.message));
+                        }
+                    }, 500); // 500ms for long press
+                });
+                
+                overseerMap.on('mouseup', function() {
+                    if (longPressTimer) {
+                        clearTimeout(longPressTimer);
+                        longPressTimer = null;
+                    }
+                });
+                
+                overseerMap.on('mousemove', function() {
+                    if (longPressTimer) {
+                        clearTimeout(longPressTimer);
+                        longPressTimer = null;
+                    }
+                });
+                
                 overseerMapInitialized = false;
             }
             
@@ -8482,28 +8537,33 @@
                 return;
             }
             
-            // Get current map center
-            const center = overseerMap.getCenter();
-            const label = prompt('Enter marker label:', 'NEW MARKER');
-            
-            if (label && label.trim()) {
-                const markerData = {
-                    label: label.trim().substring(0, 32),
-                    lat: center.lat,
-                    lng: center.lng,
-                    ts: Date.now(),
-                    from: myMailUid,
-                    fromName: userProfile.name || 'OVERSEER'
-                };
-                
-                const key = 'overseer_' + Date.now();
-                window.firebaseSet(window.firebaseRef(window.db, 'sharedpins/' + key), markerData)
-                    .then(() => {
-                        showNotification('MARKER ADDED: ' + label);
-                        updateOverseerDisplay();
-                    })
-                    .catch(err => showNotification('ERROR ADDING MARKER: ' + err.message));
-            }
+            // Use same UI as main map - prompt for label
+            showCustomPrompt('ADD MARKER AT MAP CENTER?', [
+                { label: 'ADD MARKER', action: () => {
+                    const label = prompt('Enter marker label:', 'NEW MARKER');
+                    if (label && label.trim()) {
+                        const center = overseerMap.getCenter();
+                        const markerData = {
+                            label: label.trim().substring(0, 32),
+                            lat: center.lat,
+                            lng: center.lng,
+                            ts: Date.now(),
+                            from: myMailUid,
+                            fromName: userProfile.name || 'OVERSEER'
+                        };
+                        
+                        const key = 'overseer_' + Date.now();
+                        window.firebaseSet(window.firebaseRef(window.db, 'sharedpins/' + key), markerData)
+                            .then(() => {
+                                showNotification('MARKER ADDED: ' + label);
+                                // Refresh map markers
+                                setTimeout(() => updateOverseerDisplay(), 500);
+                            })
+                            .catch(err => showNotification('ERROR ADDING MARKER: ' + err.message));
+                    }
+                }},
+                { label: 'CANCEL', color: 'var(--pip-color-dim)' }
+            ]);
         }
 
         function overseerRemoveMarker() {
@@ -8524,7 +8584,8 @@
                             window.firebaseRemove(window.firebaseRef(window.db, 'sharedpins/' + key))
                                 .then(() => {
                                     showNotification('MARKER REMOVED');
-                                    updateOverseerDisplay();
+                                    // Refresh display after removal
+                                    setTimeout(() => updateOverseerDisplay(), 500);
                                 })
                                 .catch(err => showNotification('ERROR: ' + err.message));
                         }
@@ -8549,7 +8610,6 @@
                 const z = lastKnownRadZones[key];
                 const kind = z.kind || 'hot';
                 const label = z.label || (kind === 'med' ? 'MED ZONE' : kind === 'decon' ? 'DECON STATION' : 'HOT ZONE');
-                const color = kind === 'med' ? '#5fc98e' : kind === 'decon' ? '#42d4f5' : '#ff3333';
                 
                 return {
                     label: '✖ ' + label,
@@ -8630,12 +8690,27 @@
                 zoneCount++;
             });
             
-            // Add pins
+            // Add pins (theme-colored diamonds like main map)
             let pinCount = 0;
             Object.values(pins).forEach(pin => {
                 if (!pin.lat || !pin.lng) return;
                 
-                const marker = L.marker([pin.lat, pin.lng]).addTo(overseerMap);
+                // Create diamond icon with theme color
+                const diamondIcon = L.divIcon({
+                    className: 'custom-diamond-pin',
+                    html: `<div style="
+                        width: 20px;
+                        height: 20px;
+                        background: var(--pip-color);
+                        border: 2px solid var(--pip-color);
+                        transform: rotate(45deg);
+                        box-shadow: 0 0 8px var(--pip-color);
+                    "></div>`,
+                    iconSize: [20, 20],
+                    iconAnchor: [10, 10]
+                });
+                
+                const marker = L.marker([pin.lat, pin.lng], { icon: diamondIcon }).addTo(overseerMap);
                 if (pin.label) {
                     marker.bindTooltip(pin.label, { permanent: false });
                 }
