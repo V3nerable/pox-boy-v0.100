@@ -6648,9 +6648,10 @@
 
         // v0.119: Snap now button in photo picker
         function snapNowForPicker() {
-            // v0.121: Open quick camera overlay instead of switching tabs
-            // Keep photo picker state so we can refresh it after capture
-            openQuickCam();
+            // Reverted to original flow: switch to camera tab
+            document.getElementById('photo-pick-modal').style.display = 'none';
+            switchMainTab('cam');
+            showNotification('TAKE PHOTO, THEN RETURN TO QUEST TO ATTACH');
         }
 
         function pickPhotoForMail(idx) {
@@ -8394,28 +8395,76 @@
             window.firebaseGet(window.firebaseRef(window.db, 'wastelanders')).then(snap => {
                 const wastelanders = snap.val() || {};
                 
-                let html = '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px;">';
+                let html = '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px;">';
                 players.forEach((p, idx) => {
                     const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `${idx + 1}.`;
                     const displayName = showNames ? escapeHtml(p.name) : 'WASTELANDER';
-                    const statusColor = p.rads >= 1000 ? '#ff3333' : p.rads >= 500 ? '#ffb642' : '#5fc98e';
-                    const statusText = p.rads >= 1000 ? 'GLOWING ONE' : p.hp === 0 ? 'DEAD' : 'ACTIVE';
+                    
+                    // Status and border color based on rads
+                    const isGlowing = p.rads >= 1000;
+                    const isHighRads = p.rads >= 500 && p.rads < 1000;
+                    const isDead = p.hp === 0;
+                    
+                    let borderColor = 'var(--pip-color)';
+                    let statusColor = '#5fc98e';
+                    let statusText = 'ACTIVE';
+                    
+                    if (isDead) {
+                        borderColor = '#666666';
+                        statusColor = '#666666';
+                        statusText = 'DEAD';
+                    } else if (isGlowing) {
+                        borderColor = '#ff3333';
+                        statusColor = '#ff3333';
+                        statusText = '☢ GLOWING ONE';
+                    } else if (isHighRads) {
+                        borderColor = '#ffb642';
+                        statusColor = '#ffb642';
+                        statusText = '⚠ HIGH RADS';
+                    }
                     
                     // Get avatar if available
                     const w = wastelanders[p.uid];
-                    const avatar = w && w.avatar ? `<img src="${w.avatar}" style="width: 60px; height: 60px; border-radius: 50%; border: 2px solid var(--pip-color); margin: 0 auto 8px auto; display: block;">` : '<div style="width: 60px; height: 60px; border-radius: 50%; border: 2px solid var(--pip-color); margin: 0 auto 8px auto; display: flex; align-items: center; justify-content: center; opacity: 0.3;">?</div>';
+                    const avatar = w && w.avatar ? `<img src="${w.avatar}" style="width: 70px; height: 70px; border-radius: 50%; border: 3px solid ${borderColor}; margin: 0 auto 10px auto; display: block; box-shadow: 0 0 10px ${borderColor};">` : '<div style="width: 70px; height: 70px; border-radius: 50%; border: 3px solid ${borderColor}; margin: 0 auto 10px auto; display: flex; align-items: center; justify-content: center; opacity: 0.3; font-size: 2rem;">?</div>';
                     
                     html += `
-                        <div style="border: 1px solid var(--pip-color); padding: 12px; background: rgba(0,0,0,0.3); text-align: center;">
+                        <div style="border: 2px solid ${borderColor}; padding: 15px; background: rgba(0,0,0,0.4); box-shadow: 0 0 15px ${borderColor}40;">
                             ${avatar}
-                            <div style="font-weight: bold; margin-bottom: 5px;">${medal} ${displayName}</div>
-                            <div style="color: ${statusColor}; font-size: 0.85rem; margin-bottom: 8px;">${statusText}</div>
-                            <div style="font-size: 0.75rem; opacity: 0.8; line-height: 1.4;">
-                                <div>Quests: ${p.questsCompleted}</div>
-                                <div>Bounties: ${p.bountiesClaimed}/${p.bountiesSurvived}</div>
-                                <div>Photos: ${p.photosTaken}</div>
-                                <div>Rads: ${p.rads} | Mut: ${p.mutations}</div>
-                                <div>HP: ${p.hp}</div>
+                            <div style="font-weight: bold; font-size: 1.1rem; margin-bottom: 6px; text-align: center;">${medal} ${displayName}</div>
+                            <div style="color: ${statusColor}; font-size: 0.95rem; margin-bottom: 12px; text-align: center; font-weight: bold;">${statusText}</div>
+                            
+                            <div style="border-top: 1px solid ${borderColor}40; padding-top: 10px; margin-top: 10px;">
+                                <div style="display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 0.9rem;">
+                                    <span style="opacity: 0.8;">Quests Completed:</span>
+                                    <span style="font-weight: bold;">${p.questsCompleted}</span>
+                                </div>
+                                <div style="display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 0.9rem;">
+                                    <span style="opacity: 0.8;">Bounties Claimed:</span>
+                                    <span style="font-weight: bold;">${p.bountiesClaimed}</span>
+                                </div>
+                                <div style="display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 0.9rem;">
+                                    <span style="opacity: 0.8;">Bounties Survived:</span>
+                                    <span style="font-weight: bold;">${p.bountiesSurvived}</span>
+                                </div>
+                                <div style="display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 0.9rem;">
+                                    <span style="opacity: 0.8;">Photos Taken:</span>
+                                    <span style="font-weight: bold;">${p.photosTaken}</span>
+                                </div>
+                            </div>
+                            
+                            <div style="border-top: 1px solid ${borderColor}40; padding-top: 10px; margin-top: 10px;">
+                                <div style="display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 0.9rem;">
+                                    <span style="opacity: 0.8;">Health:</span>
+                                    <span style="font-weight: bold; color: ${p.hp > 50 ? '#5fc98e' : p.hp > 20 ? '#ffb642' : '#ff3333'};">${p.hp} HP</span>
+                                </div>
+                                <div style="display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 0.9rem;">
+                                    <span style="opacity: 0.8;">Radiation:</span>
+                                    <span style="font-weight: bold; color: #ff3333;">${p.rads} rads</span>
+                                </div>
+                                <div style="display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 0.9rem;">
+                                    <span style="opacity: 0.8;">Mutations:</span>
+                                    <span style="font-weight: bold; color: #ffb642;">${p.mutations}</span>
+                                </div>
                             </div>
                         </div>
                     `;
@@ -8424,6 +8473,95 @@
                 
                 container.innerHTML = html;
             });
+        }
+
+        // v0.130: Overseer map control functions
+        function overseerAddMarker() {
+            if (!overseerMap) {
+                showNotification('MAP NOT INITIALIZED');
+                return;
+            }
+            
+            // Get current map center
+            const center = overseerMap.getCenter();
+            const label = prompt('Enter marker label:', 'NEW MARKER');
+            
+            if (label && label.trim()) {
+                const markerData = {
+                    label: label.trim().substring(0, 32),
+                    lat: center.lat,
+                    lng: center.lng,
+                    ts: Date.now(),
+                    from: myMailUid,
+                    fromName: userProfile.name || 'OVERSEER'
+                };
+                
+                const key = 'overseer_' + Date.now();
+                window.firebaseSet(window.firebaseRef(window.db, 'sharedpins/' + key), markerData)
+                    .then(() => {
+                        showNotification('MARKER ADDED: ' + label);
+                        updateOverseerDisplay();
+                    })
+                    .catch(err => showNotification('ERROR ADDING MARKER: ' + err.message));
+            }
+        }
+
+        function overseerRemoveMarker() {
+            window.firebaseGet(window.firebaseRef(window.db, 'sharedpins'))
+                .then(snap => {
+                    const pins = snap.val() || {};
+                    const pinKeys = Object.keys(pins);
+                    
+                    if (pinKeys.length === 0) {
+                        showNotification('NO MARKERS TO REMOVE');
+                        return;
+                    }
+                    
+                    // Create buttons for each marker
+                    const buttons = pinKeys.map(key => ({
+                        label: '✖ ' + (pins[key].label || 'UNNAMED'),
+                        action: () => {
+                            window.firebaseRemove(window.firebaseRef(window.db, 'sharedpins/' + key))
+                                .then(() => {
+                                    showNotification('MARKER REMOVED');
+                                    updateOverseerDisplay();
+                                })
+                                .catch(err => showNotification('ERROR: ' + err.message));
+                        }
+                    }));
+                    
+                    buttons.push({ label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} });
+                    showCustomPrompt('SELECT MARKER TO REMOVE:', buttons);
+                })
+                .catch(err => showNotification('ERROR: ' + err.message));
+        }
+
+        function overseerRemoveZone() {
+            const zoneKeys = Object.keys(lastKnownRadZones);
+            
+            if (zoneKeys.length === 0) {
+                showNotification('NO ZONES TO REMOVE');
+                return;
+            }
+            
+            // Create buttons for each zone
+            const buttons = zoneKeys.map(key => {
+                const z = lastKnownRadZones[key];
+                const kind = z.kind || 'hot';
+                const label = z.label || (kind === 'med' ? 'MED ZONE' : kind === 'decon' ? 'DECON STATION' : 'HOT ZONE');
+                const color = kind === 'med' ? '#5fc98e' : kind === 'decon' ? '#42d4f5' : '#ff3333';
+                
+                return {
+                    label: '✖ ' + label,
+                    action: () => {
+                        extinguishZone(key);
+                        setTimeout(() => updateOverseerDisplay(), 500);
+                    }
+                };
+            });
+            
+            buttons.push({ label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} });
+            showCustomPrompt('SELECT ZONE TO REMOVE:', buttons);
         }
 
         function updateOverseerMap(wastelanders, zones, pins) {
