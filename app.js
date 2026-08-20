@@ -4746,7 +4746,25 @@
             const modal = document.getElementById('quick-cam-modal');
             const video = document.getElementById('quick-cam-video');
             
+            if (!modal) {
+                showNotification('ERROR: Camera modal not found');
+                return;
+            }
+            
+            if (!video) {
+                showNotification('ERROR: Video element not found');
+                return;
+            }
+            
+            // Show modal first
             modal.style.display = 'flex';
+            
+            // Check if camera API is available
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                showNotification('ERROR: Camera not supported on this device');
+                closeQuickCam();
+                return;
+            }
             
             // Start camera
             navigator.mediaDevices.getUserMedia({ 
@@ -4756,7 +4774,9 @@
                 .then(stream => {
                     quickCamStream = stream;
                     video.srcObject = stream;
-                    video.play();
+                    video.play().catch(err => {
+                        showNotification('ERROR: Could not start video playback');
+                    });
                 })
                 .catch(err => {
                     showNotification('CAMERA ERROR: ' + err.message);
