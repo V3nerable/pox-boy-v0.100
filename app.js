@@ -8163,6 +8163,7 @@
         let overseerMapPins = [];
         let overseerRefreshInterval = null;
         let overseerRefreshCountdown = 30;
+        let overseerMapInitialized = false;
 
         function openOverseerDisplay() {
             if (localStorage.getItem('pipboy-dev-mode') !== 'true') {
@@ -8172,7 +8173,7 @@
             
             document.getElementById('overseer-display-modal').style.display = 'flex';
             
-            // Initialize map
+            // Initialize map with dark tiles
             if (!overseerMap) {
                 overseerMap = L.map('overseer-map', {
                     center: [-31.9505, 115.8605], // Perth default
@@ -8180,9 +8181,12 @@
                     zoomControl: true
                 });
                 
-                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                    attribution: '© OpenStreetMap contributors'
+                // Use dark tiles like main map
+                L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                    attribution: '© OpenStreetMap contributors © CARTO'
                 }).addTo(overseerMap);
+                
+                overseerMapInitialized = false;
             }
             
             // Start auto-refresh
@@ -8368,30 +8372,42 @@
                 return;
             }
             
-            let html = '';
-            players.forEach((p, idx) => {
-                const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `${idx + 1}.`;
-                const displayName = showNames ? escapeHtml(p.name) : 'WASTELANDER';
-                const statusColor = p.rads >= 1000 ? '#ff3333' : p.rads >= 500 ? '#ffb642' : '#5fc98e';
-                const statusText = p.rads >= 1000 ? 'GLOWING ONE' : p.hp === 0 ? 'DEAD' : 'ACTIVE';
+            // Fetch wastelanders data for avatars
+            window.firebaseGet(window.firebaseRef(window.db, 'wastelanders')).then(snap => {
+                const wastelanders = snap.val() || {};
                 
-                html += `
-                    <div style="border: 1px solid var(--pip-color); padding: 10px; margin-bottom: 8px; background: rgba(0,0,0,0.3);">
-                        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-                            <strong>${medal} ${displayName}</strong>
-                            <span style="color: ${statusColor};">${statusText}</span>
+                let html = '';
+                players.forEach((p, idx) => {
+                    const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `${idx + 1}.`;
+                    const displayName = showNames ? escapeHtml(p.name) : 'WASTELANDER';
+                    const statusColor = p.rads >= 1000 ? '#ff3333' : p.rads >= 500 ? '#ffb642' : '#5fc98e';
+                    const statusText = p.rads >= 1000 ? 'GLOWING ONE' : p.hp === 0 ? 'DEAD' : 'ACTIVE';
+                    
+                    // Get avatar if available
+                    const w = wastelanders[p.uid];
+                    const avatar = w && w.avatar ? `<img src="${w.avatar}" style="width: 40px; height: 40px; border-radius: 50%; border: 2px solid var(--pip-color); margin-right: 10px;">` : '';
+                    
+                    html += `
+                        <div style="border: 1px solid var(--pip-color); padding: 10px; margin-bottom: 8px; background: rgba(0,0,0,0.3); display: flex; align-items: center;">
+                            ${avatar}
+                            <div style="flex-grow: 1;">
+                                <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                                    <strong>${medal} ${displayName}</strong>
+                                    <span style="color: ${statusColor};">${statusText}</span>
+                                </div>
+                                <div style="font-size: 0.85rem; opacity: 0.8;">
+                                    Quests: ${p.questsCompleted} | Bounties: ${p.bountiesClaimed}/${p.bountiesSurvived} | Photos: ${p.photosTaken}
+                                </div>
+                                <div style="font-size: 0.85rem; opacity: 0.8;">
+                                    Rads: ${p.rads} | Mutations: ${p.mutations} | HP: ${p.hp}
+                                </div>
+                            </div>
                         </div>
-                        <div style="font-size: 0.85rem; opacity: 0.8;">
-                            Quests: ${p.questsCompleted} | Bounties: ${p.bountiesClaimed}/${p.bountiesSurvived} | Photos: ${p.photosTaken}
-                        </div>
-                        <div style="font-size: 0.85rem; opacity: 0.8;">
-                            Rads: ${p.rads} | Mutations: ${p.mutations} | HP: ${p.hp}
-                        </div>
-                    </div>
-                `;
+                    `;
+                });
+                
+                container.innerHTML = html;
             });
-            
-            container.innerHTML = html;
         }
 
         function updateOverseerMap(wastelanders, zones, pins) {
@@ -8478,8 +8494,9 @@
             document.getElementById('overseer-map-stats').innerText = 
                 `Players: ${playerCount} | Zones: ${zoneCount} | Pins: ${pinCount}`;
             
-            // Fit bounds if we have data
-            if (playerCount > 0 || zoneCount > 0 || pinCount > 0) {
+            // Only fit bounds on first load, not on refresh
+            if (!overseerMapInitialized && (playerCount > 0 || zoneCount > 0 || pinCount > 0)) {
                 overseerMap.fitBounds(bounds, { padding: [20, 20] });
+                overseerMapInitialized = true;
             }
         }
