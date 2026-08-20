@@ -425,7 +425,7 @@
 }
 
 /* ============ SENSOR / SCANNER THEME TINT (v0.27) ============ */
-#cam-video, #cam-canvas { filter: var(--cam-filter); }
+#cam-video, #cam-canvas, #quick-cam-video { filter: var(--cam-filter); }
 
 /* Theme the html5-qrcode injected UI + feed (was raw standard colour) */
 #qr-reader { background: transparent; }
