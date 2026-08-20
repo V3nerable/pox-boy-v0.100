@@ -4738,6 +4738,98 @@
             resetCamera();
         }
 
+        // ================= v0.121 QUICK CAMERA OVERLAY =================
+        // Allows snapping evidence photos without leaving quest context
+        let quickCamStream = null;
+
+        function openQuickCam() {
+            const modal = document.getElementById('quick-cam-modal');
+            const video = document.getElementById('quick-cam-video');
+            
+            modal.style.display = 'flex';
+            
+            // Start camera
+            navigator.mediaDevices.getUserMedia({ 
+                video: { facingMode: 'environment' }, 
+                audio: false 
+            })
+                .then(stream => {
+                    quickCamStream = stream;
+                    video.srcObject = stream;
+                    video.play();
+                })
+                .catch(err => {
+                    showNotification('CAMERA ERROR: ' + err.message);
+                    closeQuickCam();
+                });
+        }
+
+        function captureQuickCam() {
+            const video = document.getElementById('quick-cam-video');
+            const canvas = document.getElementById('quick-cam-canvas');
+            
+            if (!video || !video.videoWidth) {
+                showNotification('CAMERA NOT READY');
+                return;
+            }
+            
+            // Capture frame
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0);
+            
+            // Save to databank
+            const timestamp = Date.now();
+            const pipData = canvas.toDataURL('image/jpeg', 0.7);
+            const rawData = canvas.toDataURL('image/png', 1.0);
+            
+            const photo = {
+                id: timestamp,
+                pip: pipData,
+                raw: rawData,
+                timestamp: timestamp,
+                type: 'quick-cam'
+            };
+            
+            photoArchive.unshift(photo);
+            try {
+                localStorage.setItem('pipboy-photos', JSON.stringify(photoArchive));
+            } catch (e) {
+                showNotification('STORAGE ERROR: Photo saved to session only');
+            }
+            
+            showNotification('📷 PHOTO CAPTURED - SELECT FROM DATABANK');
+            
+            // Close camera and refresh picker
+            closeQuickCam();
+            
+            // Refresh photo picker if it was open
+            if (window.pendingQuestPhoto && window.pendingQuestPhoto.questId) {
+                setTimeout(() => {
+                    attachPhotoToQuest(window.pendingQuestPhoto.questId);
+                }, 300);
+            }
+        }
+
+        function closeQuickCam() {
+            const modal = document.getElementById('quick-cam-modal');
+            const video = document.getElementById('quick-cam-video');
+            
+            // Stop camera stream
+            if (quickCamStream) {
+                quickCamStream.getTracks().forEach(track => track.stop());
+                quickCamStream = null;
+            }
+            
+            if (video) {
+                video.srcObject = null;
+            }
+            
+            modal.style.display = 'none';
+        }
+
+
         let photoArchive = JSON.parse(localStorage.getItem('pipboy-photos')) || [];
 
         // ================= v0.43 DUAL-CAPTURE ARCHIVE ENGINE =================
@@ -6518,16 +6610,9 @@
 
         // v0.119: Snap now button in photo picker
         function snapNowForPicker() {
-            // Close the picker
-            document.getElementById('photo-pick-modal').style.display = 'none';
-            
-            // Switch to camera tab
-            switchMainTab('cam');
-            
-            // Set flag to reopen picker after photo is taken
-            window.reopenPickerAfterSnap = true;
-            
-            showNotification('TAKE PHOTO FOR EVIDENCE');
+            // v0.121: Open quick camera overlay instead of switching tabs
+            // Keep photo picker state so we can refresh it after capture
+            openQuickCam();
         }
 
         function pickPhotoForMail(idx) {
