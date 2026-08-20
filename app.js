@@ -2244,10 +2244,16 @@
             // v0.107: Allow issuer to cancel open quests
             if (q.issuerUid === myUid && q.status === 'open') {
                 buttons.push({ label: 'CANCEL QUEST', color: '#ff3333', action: () => cancelQuest(id) });
+                // v0.120: Allow issuer to complete quest globally (marks as expired for non-completers)
+                buttons.push({ label: 'COMPLETE GLOBALLY', color: '#ffb642', action: () => completeQuestGlobally(id) });
             }
             // v0.107: Allow issuer to cancel accepted quests (with warning)
             else if (q.issuerUid === myUid && q.status !== 'cancelled' && q.status !== 'removed') {
                 buttons.push({ label: 'CANCEL QUEST (HAS PROGRESS)', color: '#ff3333', action: () => cancelQuest(id) });
+                // v0.120: Also allow complete globally for quests with progress
+                if (q.status === 'open') {
+                    buttons.push({ label: 'COMPLETE GLOBALLY', color: '#ffb642', action: () => completeQuestGlobally(id) });
+                }
             }
             // v0.110: Allow issuer to uncancel cancelled quests
             if (q.issuerUid === myUid && q.status === 'cancelled') {
@@ -2483,6 +2489,26 @@
                         .then(() => {
                             closeCustomPrompt();
                             showNotification('QUEST UNCANCELLED');
+                            renderIssuedQuests();
+                        })
+                        .catch(err => showNotification('ERROR: ' + err.message));
+                }},
+                { label: 'BACK', color: 'var(--pip-color-dim)', action: () => {} }
+            ]);
+        }
+
+        // v0.120: Complete quest globally - marks as expired for non-completers
+        function completeQuestGlobally(id) {
+            showCustomPrompt('COMPLETE QUEST GLOBALLY?\n\nThis will:\n• Mark quest as EXPIRED for users who haven\'t completed it\n• Keep COMPLETED status for users who already completed it\n• Prevent new completions', [
+                { label: 'COMPLETE GLOBALLY', color: '#ffb642', action: () => {
+                    const questRef = window.firebaseRef(window.db, `quests/${id}`);
+                    window.firebaseUpdate(questRef, { 
+                        status: 'expired',
+                        expiredAt: Date.now()
+                    })
+                        .then(() => {
+                            closeCustomPrompt();
+                            showNotification('QUEST COMPLETED GLOBALLY - MARKED AS EXPIRED FOR NON-COMPLETERS');
                             renderIssuedQuests();
                         })
                         .catch(err => showNotification('ERROR: ' + err.message));
@@ -6488,6 +6514,20 @@
                 document.getElementById('compose-msg-modal').style.display = 'flex';
             }
             photoPickMode = 'send';
+        }
+
+        // v0.119: Snap now button in photo picker
+        function snapNowForPicker() {
+            // Close the picker
+            document.getElementById('photo-pick-modal').style.display = 'none';
+            
+            // Switch to camera tab
+            switchMainTab('cam');
+            
+            // Set flag to reopen picker after photo is taken
+            window.reopenPickerAfterSnap = true;
+            
+            showNotification('TAKE PHOTO FOR EVIDENCE');
         }
 
         function pickPhotoForMail(idx) {
