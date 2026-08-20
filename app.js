@@ -8155,3 +8155,331 @@
 
         renderQuests();
         initOnboarding();
+
+        // ================= v0.126 OVERSEER DISPLAY OVERLAY =================
+        let overseerMap = null;
+        let overseerMapMarkers = [];
+        let overseerMapZones = [];
+        let overseerMapPins = [];
+        let overseerRefreshInterval = null;
+        let overseerRefreshCountdown = 30;
+
+        function openOverseerDisplay() {
+            if (localStorage.getItem('pipboy-dev-mode') !== 'true') {
+                showNotification('OVERSEER ACCESS REQUIRED');
+                return;
+            }
+            
+            document.getElementById('overseer-display-modal').style.display = 'flex';
+            
+            // Initialize map
+            if (!overseerMap) {
+                overseerMap = L.map('overseer-map', {
+                    center: [-31.9505, 115.8605], // Perth default
+                    zoom: 13,
+                    zoomControl: true
+                });
+                
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '© OpenStreetMap contributors'
+                }).addTo(overseerMap);
+            }
+            
+            // Start auto-refresh
+            overseerRefreshCountdown = 30;
+            updateOverseerDisplay();
+            overseerRefreshInterval = setInterval(() => {
+                overseerRefreshCountdown--;
+                if (overseerRefreshCountdown <= 0) {
+                    overseerRefreshCountdown = 30;
+                    updateOverseerDisplay();
+                }
+                document.getElementById('overseer-refresh-timer').innerText = `Auto-refresh: ${overseerRefreshCountdown}s`;
+            }, 1000);
+        }
+
+        function closeOverseerDisplay() {
+            document.getElementById('overseer-display-modal').style.display = 'none';
+            if (overseerRefreshInterval) {
+                clearInterval(overseerRefreshInterval);
+                overseerRefreshInterval = null;
+            }
+        }
+
+        function updateOverseerDisplay() {
+            if (!window.db) {
+                showNotification('DATABASE NOT AVAILABLE');
+                return;
+            }
+            
+            // Fetch all data
+            Promise.all([
+                window.firebaseGet(window.firebaseRef(window.db, 'wastelanders')),
+                window.firebaseGet(window.firebaseRef(window.db, 'quests')),
+                window.firebaseGet(window.firebaseRef(window.db, 'bounties')),
+                window.firebaseGet(window.firebaseRef(window.db, 'radzones')),
+                window.firebaseGet(window.firebaseRef(window.db, 'sharedpins'))
+            ]).then(([wastelandersSnap, questsSnap, bountiesSnap, zonesSnap, pinsSnap]) => {
+                const wastelanders = wastelandersSnap.val() || {};
+                const quests = questsSnap.val() || {};
+                const bounties = bountiesSnap.val() || {};
+                const zones = zonesSnap.val() || {};
+                const pins = pinsSnap.val() || {};
+                
+                // Aggregate player stats
+                const playerStats = aggregatePlayerStats(wastelanders, quests, bounties);
+                
+                // Apply filters and sorting
+                const filteredPlayers = filterAndSortPlayers(playerStats);
+                
+                // Render player list
+                renderOverseerPlayerList(filteredPlayers);
+                
+                // Update map
+                updateOverseerMap(wastelanders, zones, pins);
+                
+            }).catch(err => {
+                console.error('Error fetching overseer data:', err);
+                showNotification('ERROR LOADING DATA');
+            });
+        }
+
+        function aggregatePlayerStats(wastelanders, quests, bounties) {
+            const stats = {};
+            
+            // Initialize stats for all wastelanders
+            Object.keys(wastelanders).forEach(uid => {
+                const w = wastelanders[uid];
+                stats[uid] = {
+                    uid: uid,
+                    name: w.name || 'UNKNOWN',
+                    hp: w.hp || 0,
+                    rads: w.rads || 0,
+                    mutations: w.mutations ? w.mutations.length : 0,
+                    lastSeen: w.lastSeen || 0,
+                    questsCompleted: 0,
+                    bountiesClaimed: 0,
+                    bountiesSurvived: 0,
+                    photosTaken: 0
+                };
+            });
+            
+            // Aggregate quest stats
+            Object.values(quests).forEach(quest => {
+                if (quest.progress) {
+                    Object.keys(quest.progress).forEach(uid => {
+                        const prog = quest.progress[uid];
+                        if (stats[uid]) {
+                            if (prog.status === 'verified') {
+                                stats[uid].questsCompleted++;
+                            }
+                            if (prog.evidencePhoto) {
+                                stats[uid].photosTaken++;
+                            }
+                        }
+                    });
+                }
+            });
+            
+            // Aggregate bounty stats
+            Object.values(bounties).forEach(bounty => {
+                // Bounties claimed
+                if (bounty.claimedBy && stats[bounty.claimedBy]) {
+                    stats[bounty.claimedBy].bountiesClaimed++;
+                }
+                
+                // Bounties survived (target of cancelled bounty)
+                if (bounty.targetUid && stats[bounty.targetUid]) {
+                    if (bounty.status === 'cancelled') {
+                        stats[bounty.targetUid].bountiesSurvived++;
+                    }
+                }
+            });
+            
+            return stats;
+        }
+
+        function filterAndSortPlayers(playerStats) {
+            const filter = document.getElementById('overseer-filter').value;
+            const sort = document.getElementById('overseer-sort').value;
+            
+            let players = Object.values(playerStats);
+            
+            // Apply filters
+            const now = Date.now();
+            switch (filter) {
+                case 'active':
+                    players = players.filter(p => p.hp > 0 && (now - p.lastSeen) < 300000); // 5 min
+                    break;
+                case 'glowing':
+                    players = players.filter(p => p.rads >= 1000);
+                    break;
+                case 'highrads':
+                    players = players.filter(p => p.rads >= 500);
+                    break;
+                case 'mutated':
+                    players = players.filter(p => p.mutations > 0);
+                    break;
+                case 'questmasters':
+                    players = players.filter(p => p.questsCompleted >= 10);
+                    break;
+                case 'bountyhunters':
+                    players = players.filter(p => p.bountiesClaimed > 0);
+                    break;
+            }
+            
+            // Apply sorting
+            switch (sort) {
+                case 'quests':
+                    players.sort((a, b) => b.questsCompleted - a.questsCompleted);
+                    break;
+                case 'bounties':
+                    players.sort((a, b) => b.bountiesClaimed - a.bountiesClaimed);
+                    break;
+                case 'survived':
+                    players.sort((a, b) => b.bountiesSurvived - a.bountiesSurvived);
+                    break;
+                case 'photos':
+                    players.sort((a, b) => b.photosTaken - a.photosTaken);
+                    break;
+                case 'rads':
+                    players.sort((a, b) => b.rads - a.rads);
+                    break;
+                case 'mutations':
+                    players.sort((a, b) => b.mutations - a.mutations);
+                    break;
+                case 'lastseen':
+                    players.sort((a, b) => b.lastSeen - a.lastSeen);
+                    break;
+                case 'name':
+                    players.sort((a, b) => a.name.localeCompare(b.name));
+                    break;
+            }
+            
+            return players;
+        }
+
+        function renderOverseerPlayerList(players) {
+            const container = document.getElementById('overseer-player-list');
+            const showNames = document.getElementById('overseer-show-names').checked;
+            
+            if (players.length === 0) {
+                container.innerHTML = '<p style="text-align: center; opacity: 0.5;">No players match filter</p>';
+                return;
+            }
+            
+            let html = '';
+            players.forEach((p, idx) => {
+                const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `${idx + 1}.`;
+                const displayName = showNames ? escapeHtml(p.name) : 'WASTELANDER';
+                const statusColor = p.rads >= 1000 ? '#ff3333' : p.rads >= 500 ? '#ffb642' : '#5fc98e';
+                const statusText = p.rads >= 1000 ? 'GLOWING ONE' : p.hp === 0 ? 'DEAD' : 'ACTIVE';
+                
+                html += `
+                    <div style="border: 1px solid var(--pip-color); padding: 10px; margin-bottom: 8px; background: rgba(0,0,0,0.3);">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                            <strong>${medal} ${displayName}</strong>
+                            <span style="color: ${statusColor};">${statusText}</span>
+                        </div>
+                        <div style="font-size: 0.85rem; opacity: 0.8;">
+                            Quests: ${p.questsCompleted} | Bounties: ${p.bountiesClaimed}/${p.bountiesSurvived} | Photos: ${p.photosTaken}
+                        </div>
+                        <div style="font-size: 0.85rem; opacity: 0.8;">
+                            Rads: ${p.rads} | Mutations: ${p.mutations} | HP: ${p.hp}
+                        </div>
+                    </div>
+                `;
+            });
+            
+            container.innerHTML = html;
+        }
+
+        function updateOverseerMap(wastelanders, zones, pins) {
+            if (!overseerMap) return;
+            
+            // Clear existing markers
+            overseerMapMarkers.forEach(m => overseerMap.removeLayer(m));
+            overseerMapZones.forEach(z => overseerMap.removeLayer(z));
+            overseerMapPins.forEach(p => overseerMap.removeLayer(p));
+            overseerMapMarkers = [];
+            overseerMapZones = [];
+            overseerMapPins = [];
+            
+            const now = Date.now();
+            const bounds = L.latLngBounds();
+            let playerCount = 0;
+            
+            // Add player markers
+            Object.values(wastelanders).forEach(w => {
+                if (!w.lat || !w.lng) return;
+                
+                const isOnline = (now - (w.lastSeen || 0)) < 300000; // 5 min
+                const isGlowing = w.rads >= 1000;
+                const isHighRads = w.rads >= 500 && w.rads < 1000;
+                const isDead = w.hp === 0;
+                
+                let color = '#5fc98e'; // Green (active)
+                if (isDead) color = '#666666'; // Gray (dead)
+                else if (isGlowing) color = '#ff3333'; // Red (glowing)
+                else if (isHighRads) color = '#ffb642'; // Amber (high rads)
+                else if (!isOnline) color = '#999999'; // Light gray (offline)
+                
+                const marker = L.circleMarker([w.lat, w.lng], {
+                    radius: 8,
+                    fillColor: color,
+                    color: color,
+                    weight: 2,
+                    fillOpacity: 0.8
+                }).addTo(overseerMap);
+                
+                marker.bindTooltip(w.name || 'UNKNOWN', { permanent: false });
+                overseerMapMarkers.push(marker);
+                bounds.extend([w.lat, w.lng]);
+                playerCount++;
+            });
+            
+            // Add zones
+            let zoneCount = 0;
+            Object.entries(zones).forEach(([id, zone]) => {
+                if (!zone.lat || !zone.lng || !zone.radius) return;
+                
+                let color = '#ff3333'; // Red (hot)
+                if (zone.type === 'med') color = '#5fc98e'; // Green (med)
+                else if (zone.type === 'decon') color = '#42d4f5'; // Cyan (decon)
+                
+                const circle = L.circle([zone.lat, zone.lng], {
+                    radius: zone.radius,
+                    fillColor: color,
+                    color: color,
+                    weight: 2,
+                    fillOpacity: 0.2
+                }).addTo(overseerMap);
+                
+                overseerMapZones.push(circle);
+                bounds.extend([zone.lat, zone.lng]);
+                zoneCount++;
+            });
+            
+            // Add pins
+            let pinCount = 0;
+            Object.values(pins).forEach(pin => {
+                if (!pin.lat || !pin.lng) return;
+                
+                const marker = L.marker([pin.lat, pin.lng]).addTo(overseerMap);
+                if (pin.label) {
+                    marker.bindTooltip(pin.label, { permanent: false });
+                }
+                overseerMapPins.push(marker);
+                bounds.extend([pin.lat, pin.lng]);
+                pinCount++;
+            });
+            
+            // Update stats
+            document.getElementById('overseer-map-stats').innerText = 
+                `Players: ${playerCount} | Zones: ${zoneCount} | Pins: ${pinCount}`;
+            
+            // Fit bounds if we have data
+            if (playerCount > 0 || zoneCount > 0 || pinCount > 0) {
+                overseerMap.fitBounds(bounds, { padding: [20, 20] });
+            }
+        }
