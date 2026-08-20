@@ -5730,7 +5730,7 @@
                     const zColor = zk2 === 'med' ? '#5fc98e' : (zk2 === 'decon' ? '#42d4f5' : '#ff3333');
                     const zGlyph = zk2 === 'med' ? '✚' : (zk2 === 'decon' ? '✦' : '☢');
                     const zLabel = zk2 === 'med' ? 'MED ZONE' : (zk2 === 'decon' ? 'DECON STATION' : 'HOT ZONE');
-                    html += '<div class="item-row"><div class="item-info"><div style="color:' + zColor + ';">' + zGlyph + ' ' + escapeHtml(z.label || zLabel) + '</div><div class="item-effects">DEPLOYED ' + timeOf(z.ts || Date.now()) + '</div></div><button class="theme-btn" onclick="extinguishZone(\'' + escapeHtml(zk) + '\')">[EXTINGUISH]</button></div>';
+                    html += '<div class="item-row"><div class="item-info"><div style="color:' + zColor + ';">' + zGlyph + ' ' + escapeHtml(z.label || zLabel) + '</div><div class="item-effects">DEPLOYED ' + timeOf(z.ts || Date.now()) + '</div></div><div style="display:flex; gap:5px;"><button class="theme-btn" onclick="renameZone(\'' + escapeHtml(zk) + '\', \'' + escapeHtml(z.label || zLabel) + '\')">[RENAME]</button><button class="theme-btn" onclick="extinguishZone(\'' + escapeHtml(zk) + '\')">[EXTINGUISH]</button></div></div>';
                 });
             }
             html += '<div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;"><button class="pip-btn" style="border-color:#ff3333; color:#ff3333; flex:1; margin:0; min-width:120px;" onclick="dropHotZone(\'me\')">[☢ HOT ZONE AT MY POSITION]</button><button class="pip-btn" style="border-color:#5fc98e; color:#5fc98e; flex:1; margin:0; min-width:120px;" onclick="dropMedZone(\'me\')">[✚ MED ZONE AT MY POSITION]</button><button class="pip-btn" style="border-color:#42d4f5; color:#42d4f5; flex:1; margin:0; min-width:120px;" onclick="dropDeconZone(\'me\')">[✦ DECON AT MY POSITION]</button></div>';
@@ -5838,6 +5838,24 @@
                             if (selectedZoneKey === key) deselectZone(); // v0.51: clear the pinned card
                         })
                         .catch(() => showNotification('ORDER FAILED -- CHECK SIGNAL.'));
+                }},
+                { label: 'CANCEL', color: 'var(--pip-color-dim)' }
+            ]);
+        }
+
+        function renameZone(key, currentLabel) {
+            if (!window.db || navigator.onLine === false) { showNotification('NO SIGNAL -- ORDER NOT TRANSMITTED.'); return; }
+            showCustomPrompt('RENAME THIS ZONE?', [
+                { label: 'ENTER NEW NAME', action: () => {
+                    const newLabel = prompt('Enter new zone name (max 32 chars):', currentLabel);
+                    if (newLabel && newLabel.trim()) {
+                        const trimmedLabel = newLabel.trim().substring(0, 32);
+                        window.firebaseUpdate(window.firebaseRef(window.db, 'radzones/' + key), { label: trimmedLabel })
+                            .then(() => {
+                                showNotification('ZONE RENAMED: ' + trimmedLabel);
+                            })
+                            .catch(() => showNotification('RENAME FAILED -- CHECK SIGNAL.'));
+                    }
                 }},
                 { label: 'CANCEL', color: 'var(--pip-color-dim)' }
             ]);
@@ -8376,7 +8394,7 @@
             window.firebaseGet(window.firebaseRef(window.db, 'wastelanders')).then(snap => {
                 const wastelanders = snap.val() || {};
                 
-                let html = '';
+                let html = '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px;">';
                 players.forEach((p, idx) => {
                     const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `${idx + 1}.`;
                     const displayName = showNames ? escapeHtml(p.name) : 'WASTELANDER';
@@ -8385,26 +8403,24 @@
                     
                     // Get avatar if available
                     const w = wastelanders[p.uid];
-                    const avatar = w && w.avatar ? `<img src="${w.avatar}" style="width: 40px; height: 40px; border-radius: 50%; border: 2px solid var(--pip-color); margin-right: 10px;">` : '';
+                    const avatar = w && w.avatar ? `<img src="${w.avatar}" style="width: 60px; height: 60px; border-radius: 50%; border: 2px solid var(--pip-color); margin: 0 auto 8px auto; display: block;">` : '<div style="width: 60px; height: 60px; border-radius: 50%; border: 2px solid var(--pip-color); margin: 0 auto 8px auto; display: flex; align-items: center; justify-content: center; opacity: 0.3;">?</div>';
                     
                     html += `
-                        <div style="border: 1px solid var(--pip-color); padding: 10px; margin-bottom: 8px; background: rgba(0,0,0,0.3); display: flex; align-items: center;">
+                        <div style="border: 1px solid var(--pip-color); padding: 12px; background: rgba(0,0,0,0.3); text-align: center;">
                             ${avatar}
-                            <div style="flex-grow: 1;">
-                                <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-                                    <strong>${medal} ${displayName}</strong>
-                                    <span style="color: ${statusColor};">${statusText}</span>
-                                </div>
-                                <div style="font-size: 0.85rem; opacity: 0.8;">
-                                    Quests: ${p.questsCompleted} | Bounties: ${p.bountiesClaimed}/${p.bountiesSurvived} | Photos: ${p.photosTaken}
-                                </div>
-                                <div style="font-size: 0.85rem; opacity: 0.8;">
-                                    Rads: ${p.rads} | Mutations: ${p.mutations} | HP: ${p.hp}
-                                </div>
+                            <div style="font-weight: bold; margin-bottom: 5px;">${medal} ${displayName}</div>
+                            <div style="color: ${statusColor}; font-size: 0.85rem; margin-bottom: 8px;">${statusText}</div>
+                            <div style="font-size: 0.75rem; opacity: 0.8; line-height: 1.4;">
+                                <div>Quests: ${p.questsCompleted}</div>
+                                <div>Bounties: ${p.bountiesClaimed}/${p.bountiesSurvived}</div>
+                                <div>Photos: ${p.photosTaken}</div>
+                                <div>Rads: ${p.rads} | Mut: ${p.mutations}</div>
+                                <div>HP: ${p.hp}</div>
                             </div>
                         </div>
                     `;
                 });
+                html += '</div>';
                 
                 container.innerHTML = html;
             });
