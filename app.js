@@ -2925,14 +2925,14 @@
             } else if (q.abandoned) {
                 toggleBtn.style.display = 'none';
                 abandonBtn.style.display = 'block';
-                abandonBtn.innerText = "RE-ENGAGE QUEST";
-                abandonBtn.onclick = executeQuestReengage;
+                abandonBtn.innerText = "REMOVE QUEST";
+                abandonBtn.onclick = executeQuestRemove;
             } else {
                 toggleBtn.style.display = 'block';
                 toggleBtn.innerText = "MARK AS COMPLETE";
                 abandonBtn.style.display = 'block';
-                abandonBtn.innerText = "ABANDON QUEST";
-                abandonBtn.onclick = executeQuestAbandon;
+                abandonBtn.innerText = "REMOVE QUEST";
+                abandonBtn.onclick = executeQuestRemove;
             }
 
             document.getElementById('quest-action-modal').style.display = 'flex';
