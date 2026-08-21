@@ -8211,12 +8211,15 @@
                 mapContainer.style.width = '100%';
                 mapContainer.style.height = '100%';
                 
-                // Invalidate map size to force redraw
-                if (pipMap) {
-                    setTimeout(() => {
+                // Invalidate map size to force redraw - use longer delay to ensure container is sized
+                setTimeout(() => {
+                    if (pipMap) {
                         pipMap.invalidateSize();
-                    }, 100);
-                }
+                        // Force a redraw by panning slightly
+                        const center = pipMap.getCenter();
+                        pipMap.panTo(center, {animate: false});
+                    }
+                }, 300);
             }
             
             // Start auto-refresh
