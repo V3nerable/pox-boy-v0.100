@@ -6847,8 +6847,20 @@
         }
 
         function transmitMsg() {
-            const text = document.getElementById('cm-text').value.trim();
-            if (!text) return showNotification('MESSAGE CANNOT BE EMPTY.');
+            let text = document.getElementById('cm-text').value.trim();
+            const hasPhoto = !!cmAttach.photo;
+            const hasItem = cmAttach.itemId !== null;
+            
+            // v0.136: Allow photo-only or item-only messages
+            if (!text && !hasPhoto && !hasItem) {
+                return showNotification('MESSAGE CANNOT BE EMPTY.');
+            }
+            
+            // Auto-fill text if empty but has attachment
+            if (!text && (hasPhoto || hasItem)) {
+                text = hasPhoto ? 'PHOTO ATTACHED' : 'ITEM ATTACHED';
+            }
+            
             const t = composeTargetInfo(contactUidTarget); // v0.37: unlinked beacon targets allowed
             if (!t) return closeModals();
             const attach = { photo: cmAttach.photo || null, item: null };
