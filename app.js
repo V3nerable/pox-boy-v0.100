@@ -3158,7 +3158,13 @@
         }
 
         function closeModals() { 
-            document.querySelectorAll('.modal-overlay').forEach(m => { m.style.display = 'none'; m.classList.remove('active'); }); 
+            // v0.139: Don't close overseer display modal when closing other modals
+            document.querySelectorAll('.modal-overlay').forEach(m => { 
+                if (m.id !== 'overseer-display-modal') {
+                    m.style.display = 'none'; 
+                    m.classList.remove('active');
+                }
+            }); 
             activeItemId = null; 
             if (html5QrCode) stopQRScanner();
         }
