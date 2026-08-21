@@ -5536,12 +5536,13 @@
                     if (!z || typeof z.lat !== 'number' || typeof z.lng !== 'number') return;
                     const d = getDistance(myLastLat, myLastLng, z.lat, z.lng);
                     const zr = (typeof z.radius === 'number') ? z.radius : 15;
-                    if (z.kind === 'med') {
+                    const kind = z.kind || 'hot'; // v0.134: default old zones to 'hot'
+                    if (kind === 'med') {
                         if (nearestMed === null || d < nearestMed.d) nearestMed = { d: d, r: zr };
                         return;
                     }
                     // v0.58: decon stations — tracked separately, once-per-entry effect
-                    if (z.kind === 'decon') {
+                    if (kind === 'decon') {
                         if (nearestDecon === null || d < nearestDecon.d) nearestDecon = { d: d, r: zr };
                         return;
                     }
@@ -8284,8 +8285,7 @@
                 // Render player list
                 renderOverseerPlayerList(filteredPlayers);
                 
-                // Update map
-                updateOverseerMap(wastelanders, zones, pins);
+                // Map updates itself via its own Firebase listeners
                 
             }).catch(err => {
                 console.error('Error fetching overseer data:', err);
