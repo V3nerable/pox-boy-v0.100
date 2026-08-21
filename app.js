@@ -3492,6 +3492,53 @@
             pipMap.on('contextmenu', function(e) {
                 openAddWaypointModal(e.latlng.lat, e.latlng.lng);
             });
+            
+            // v0.138: Touch long-press handler for mobile devices
+            let touchStartTime = null;
+            let touchStartPos = null;
+            let longPressTimer = null;
+            
+            pipMap.getContainer().addEventListener('touchstart', function(e) {
+                if (e.touches.length === 1) {
+                    touchStartTime = Date.now();
+                    touchStartPos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+                    longPressTimer = setTimeout(() => {
+                        // Long press detected - get lat/lng from touch position
+                        const rect = pipMap.getContainer().getBoundingClientRect();
+                        const point = L.point(
+                            e.touches[0].clientX - rect.left,
+                            e.touches[0].clientY - rect.top
+                        );
+                        const latlng = pipMap.containerPointToLatLng(point);
+                        openAddWaypointModal(latlng.lat, latlng.lng);
+                        touchStartTime = null;
+                        touchStartPos = null;
+                    }, 500); // 500ms for long press
+                }
+            });
+            
+            pipMap.getContainer().addEventListener('touchmove', function(e) {
+                if (longPressTimer && touchStartPos) {
+                    const dx = e.touches[0].clientX - touchStartPos.x;
+                    const dy = e.touches[0].clientY - touchStartPos.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    if (distance > 10) { // Moved more than 10px - cancel long press
+                        clearTimeout(longPressTimer);
+                        longPressTimer = null;
+                        touchStartTime = null;
+                        touchStartPos = null;
+                    }
+                }
+            });
+            
+            pipMap.getContainer().addEventListener('touchend', function(e) {
+                if (longPressTimer) {
+                    clearTimeout(longPressTimer);
+                    longPressTimer = null;
+                }
+                touchStartTime = null;
+                touchStartPos = null;
+            });
 
             // Tapping empty map clears the sticky selection (beacon OR zone, v0.51)
             pipMap.on('click', function() { if (selectedBeaconUid || selectedZoneKey || selectedPinKey) deselectBeacon(); });
@@ -6687,10 +6734,18 @@
                 setAvatarFromEntry(entry);
                 return;
             }
+            // v0.138: Allow sending photos to unlinked users
             const c = contactByUid(photoPickTarget);
-            if (!c) return closeModals();
-            showCustomPrompt('TRANSMIT THIS PHOTO TO ' + c.name + '?', [
-                { label: 'SEND PHOTO', action: () => { sendPhotoMail(c, entry); } },
+            const b = lastKnownBeaconData[photoPickTarget];
+            const name = c ? c.name : (b && b.name ? b.name : 'UNKNOWN SIGNAL');
+            
+            if (!c && !b) {
+                // No contact and no beacon data - can't send
+                return closeModals();
+            }
+            
+            showCustomPrompt('TRANSMIT THIS PHOTO TO ' + name + (c ? '' : ' (UNLINKED)') + '?', [
+                { label: 'SEND PHOTO', action: () => { sendPhotoMail(c || { uid: photoPickTarget, name: name }, entry); } },
                 { label: 'BACK', color: 'var(--pip-color-dim)', action: () => { document.getElementById('photo-pick-modal').style.display = 'flex'; } }
             ]);
         }
