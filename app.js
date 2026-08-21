@@ -8190,13 +8190,8 @@
         initOnboarding();
 
         // ================= v0.126 OVERSEER DISPLAY OVERLAY =================
-        let overseerMap = null;
-        let overseerMapMarkers = [];
-        let overseerMapZones = [];
-        let overseerMapPins = [];
         let overseerRefreshInterval = null;
         let overseerRefreshCountdown = 30;
-        let overseerMapInitialized = false;
 
         function openOverseerDisplay() {
             if (localStorage.getItem('pipboy-dev-mode') !== 'true') {
@@ -8206,61 +8201,21 @@
             
             document.getElementById('overseer-display-modal').style.display = 'flex';
             
-            // Initialize map with dark tiles
-            if (!overseerMap) {
-                overseerMap = L.map('overseer-map', {
-                    center: [-31.9505, 115.8605], // Perth default
-                    zoom: 13,
-                    zoomControl: true
-                });
+            // Move the main map into the overseer display
+            const mapContainer = document.getElementById('map-container');
+            const overseerMapContainer = document.getElementById('overseer-map-container');
+            if (mapContainer && overseerMapContainer) {
+                overseerMapContainer.innerHTML = ''; // Clear loading message
+                overseerMapContainer.appendChild(mapContainer);
+                mapContainer.style.width = '100%';
+                mapContainer.style.height = '100%';
                 
-                // Use dark tiles like main map
-                L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-                    attribution: '© OpenStreetMap contributors © CARTO'
-                }).addTo(overseerMap);
-                
-                // Add long-press handler for adding markers (like main map)
-                let longPressTimer = null;
-                overseerMap.on('mousedown', function(e) {
-                    longPressTimer = setTimeout(() => {
-                        // Long press detected - add marker at this location
-                        const label = prompt('Enter marker label:', 'NEW MARKER');
-                        if (label && label.trim()) {
-                            const markerData = {
-                                label: label.trim().substring(0, 32),
-                                lat: e.latlng.lat,
-                                lng: e.latlng.lng,
-                                ts: Date.now(),
-                                from: myMailUid,
-                                fromName: userProfile.name || 'OVERSEER'
-                            };
-                            
-                            const key = 'overseer_' + Date.now();
-                            window.firebaseSet(window.firebaseRef(window.db, 'sharedpins/' + key), markerData)
-                                .then(() => {
-                                    showNotification('MARKER ADDED: ' + label);
-                                    setTimeout(() => updateOverseerDisplay(), 500);
-                                })
-                                .catch(err => showNotification('ERROR: ' + err.message));
-                        }
-                    }, 500); // 500ms for long press
-                });
-                
-                overseerMap.on('mouseup', function() {
-                    if (longPressTimer) {
-                        clearTimeout(longPressTimer);
-                        longPressTimer = null;
-                    }
-                });
-                
-                overseerMap.on('mousemove', function() {
-                    if (longPressTimer) {
-                        clearTimeout(longPressTimer);
-                        longPressTimer = null;
-                    }
-                });
-                
-                overseerMapInitialized = false;
+                // Invalidate map size to force redraw
+                if (pipMap) {
+                    setTimeout(() => {
+                        pipMap.invalidateSize();
+                    }, 100);
+                }
             }
             
             // Start auto-refresh
@@ -8281,6 +8236,22 @@
             if (overseerRefreshInterval) {
                 clearInterval(overseerRefreshInterval);
                 overseerRefreshInterval = null;
+            }
+            
+            // Move the map back to its original location
+            const mapContainer = document.getElementById('map-container');
+            const tabMap = document.getElementById('tab-map');
+            if (mapContainer && tabMap) {
+                tabMap.insertBefore(mapContainer, tabMap.firstChild);
+                mapContainer.style.width = '';
+                mapContainer.style.height = '';
+                
+                // Invalidate map size to force redraw
+                if (pipMap) {
+                    setTimeout(() => {
+                        pipMap.invalidateSize();
+                    }, 100);
+                }
             }
         }
 
@@ -8531,201 +8502,3 @@
         }
 
         // v0.130: Overseer map control functions
-        function overseerAddMarker() {
-            if (!overseerMap) {
-                showNotification('MAP NOT INITIALIZED');
-                return;
-            }
-            
-            // Use same UI as main map - prompt for label
-            showCustomPrompt('ADD MARKER AT MAP CENTER?', [
-                { label: 'ADD MARKER', action: () => {
-                    const label = prompt('Enter marker label:', 'NEW MARKER');
-                    if (label && label.trim()) {
-                        const center = overseerMap.getCenter();
-                        const markerData = {
-                            label: label.trim().substring(0, 32),
-                            lat: center.lat,
-                            lng: center.lng,
-                            ts: Date.now(),
-                            from: myMailUid,
-                            fromName: userProfile.name || 'OVERSEER'
-                        };
-                        
-                        const key = 'overseer_' + Date.now();
-                        window.firebaseSet(window.firebaseRef(window.db, 'sharedpins/' + key), markerData)
-                            .then(() => {
-                                showNotification('MARKER ADDED: ' + label);
-                                // Refresh map markers
-                                setTimeout(() => updateOverseerDisplay(), 500);
-                            })
-                            .catch(err => showNotification('ERROR ADDING MARKER: ' + err.message));
-                    }
-                }},
-                { label: 'CANCEL', color: 'var(--pip-color-dim)' }
-            ]);
-        }
-
-        function overseerRemoveMarker() {
-            window.firebaseGet(window.firebaseRef(window.db, 'sharedpins'))
-                .then(snap => {
-                    const pins = snap.val() || {};
-                    const pinKeys = Object.keys(pins);
-                    
-                    if (pinKeys.length === 0) {
-                        showNotification('NO MARKERS TO REMOVE');
-                        return;
-                    }
-                    
-                    // Create buttons for each marker
-                    const buttons = pinKeys.map(key => ({
-                        label: '✖ ' + (pins[key].label || 'UNNAMED'),
-                        action: () => {
-                            window.firebaseRemove(window.firebaseRef(window.db, 'sharedpins/' + key))
-                                .then(() => {
-                                    showNotification('MARKER REMOVED');
-                                    // Refresh display after removal
-                                    setTimeout(() => updateOverseerDisplay(), 500);
-                                })
-                                .catch(err => showNotification('ERROR: ' + err.message));
-                        }
-                    }));
-                    
-                    buttons.push({ label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} });
-                    showCustomPrompt('SELECT MARKER TO REMOVE:', buttons);
-                })
-                .catch(err => showNotification('ERROR: ' + err.message));
-        }
-
-        function overseerRemoveZone() {
-            const zoneKeys = Object.keys(lastKnownRadZones);
-            
-            if (zoneKeys.length === 0) {
-                showNotification('NO ZONES TO REMOVE');
-                return;
-            }
-            
-            // Create buttons for each zone
-            const buttons = zoneKeys.map(key => {
-                const z = lastKnownRadZones[key];
-                const kind = z.kind || 'hot';
-                const label = z.label || (kind === 'med' ? 'MED ZONE' : kind === 'decon' ? 'DECON STATION' : 'HOT ZONE');
-                
-                return {
-                    label: '✖ ' + label,
-                    action: () => {
-                        extinguishZone(key);
-                        setTimeout(() => updateOverseerDisplay(), 500);
-                    }
-                };
-            });
-            
-            buttons.push({ label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} });
-            showCustomPrompt('SELECT ZONE TO REMOVE:', buttons);
-        }
-
-        function updateOverseerMap(wastelanders, zones, pins) {
-            if (!overseerMap) return;
-            
-            // Clear existing markers
-            overseerMapMarkers.forEach(m => overseerMap.removeLayer(m));
-            overseerMapZones.forEach(z => overseerMap.removeLayer(z));
-            overseerMapPins.forEach(p => overseerMap.removeLayer(p));
-            overseerMapMarkers = [];
-            overseerMapZones = [];
-            overseerMapPins = [];
-            
-            const now = Date.now();
-            const bounds = L.latLngBounds();
-            let playerCount = 0;
-            
-            // Add player markers
-            Object.values(wastelanders).forEach(w => {
-                if (!w.lat || !w.lng) return;
-                
-                const isOnline = (now - (w.lastSeen || 0)) < 300000; // 5 min
-                const isGlowing = w.rads >= 1000;
-                const isHighRads = w.rads >= 500 && w.rads < 1000;
-                const isDead = w.hp === 0;
-                
-                let color = '#5fc98e'; // Green (active)
-                if (isDead) color = '#666666'; // Gray (dead)
-                else if (isGlowing) color = '#ff3333'; // Red (glowing)
-                else if (isHighRads) color = '#ffb642'; // Amber (high rads)
-                else if (!isOnline) color = '#999999'; // Light gray (offline)
-                
-                const marker = L.circleMarker([w.lat, w.lng], {
-                    radius: 8,
-                    fillColor: color,
-                    color: color,
-                    weight: 2,
-                    fillOpacity: 0.8
-                }).addTo(overseerMap);
-                
-                marker.bindTooltip(w.name || 'UNKNOWN', { permanent: false });
-                overseerMapMarkers.push(marker);
-                bounds.extend([w.lat, w.lng]);
-                playerCount++;
-            });
-            
-            // Add zones
-            let zoneCount = 0;
-            Object.entries(zones).forEach(([id, zone]) => {
-                if (!zone.lat || !zone.lng || !zone.radius) return;
-                
-                let color = '#ff3333'; // Red (hot)
-                if (zone.type === 'med') color = '#5fc98e'; // Green (med)
-                else if (zone.type === 'decon') color = '#42d4f5'; // Cyan (decon)
-                
-                const circle = L.circle([zone.lat, zone.lng], {
-                    radius: zone.radius,
-                    fillColor: color,
-                    color: color,
-                    weight: 2,
-                    fillOpacity: 0.2
-                }).addTo(overseerMap);
-                
-                overseerMapZones.push(circle);
-                bounds.extend([zone.lat, zone.lng]);
-                zoneCount++;
-            });
-            
-            // Add pins (theme-colored diamonds like main map)
-            let pinCount = 0;
-            Object.values(pins).forEach(pin => {
-                if (!pin.lat || !pin.lng) return;
-                
-                // Create diamond icon with theme color
-                const diamondIcon = L.divIcon({
-                    className: 'custom-diamond-pin',
-                    html: `<div style="
-                        width: 20px;
-                        height: 20px;
-                        background: var(--pip-color);
-                        border: 2px solid var(--pip-color);
-                        transform: rotate(45deg);
-                        box-shadow: 0 0 8px var(--pip-color);
-                    "></div>`,
-                    iconSize: [20, 20],
-                    iconAnchor: [10, 10]
-                });
-                
-                const marker = L.marker([pin.lat, pin.lng], { icon: diamondIcon }).addTo(overseerMap);
-                if (pin.label) {
-                    marker.bindTooltip(pin.label, { permanent: false });
-                }
-                overseerMapPins.push(marker);
-                bounds.extend([pin.lat, pin.lng]);
-                pinCount++;
-            });
-            
-            // Update stats
-            document.getElementById('overseer-map-stats').innerText = 
-                `Players: ${playerCount} | Zones: ${zoneCount} | Pins: ${pinCount}`;
-            
-            // Only fit bounds on first load, not on refresh
-            if (!overseerMapInitialized && (playerCount > 0 || zoneCount > 0 || pinCount > 0)) {
-                overseerMap.fitBounds(bounds, { padding: [20, 20] });
-                overseerMapInitialized = true;
-            }
-        }
