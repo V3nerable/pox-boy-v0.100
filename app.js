@@ -7031,11 +7031,50 @@
         // contact (rolodex) as recipient buttons; tap one and the composer opens.
         function openRecipientPicker(kind) {
             kind = kind || 'msg';
-            if (!rolodex.length) { showNotification('NO CONTACTS LINKED -- SCAN A DATACARD FIRST.'); return; }
-            const buttons = rolodex.map(c => ({
-                label: (kind === 'quest' ? '☢ ' : '✉ ') + c.name,
-                action: () => composeTo(kind, c.uid)
-            }));
+            
+            // v0.137: Allow sending to unlinked users (for messages only)
+            // For quests and items, still require linked contacts
+            if ((kind === 'quest' || kind === 'item') && !rolodex.length) {
+                showNotification('NO CONTACTS LINKED -- SCAN A DATACARD FIRST.');
+                return;
+            }
+            
+            const buttons = [];
+            
+            // Add contacts first
+            rolodex.forEach(c => {
+                buttons.push({
+                    label: (kind === 'quest' ? '☢ ' : '✉ ') + c.name + ' (CONTACT)',
+                    action: () => composeTo(kind, c.uid)
+                });
+            });
+            
+            // For messages, also add unlinked wastelanders from beacon data
+            if (kind === 'msg') {
+                const contactUids = new Set(rolodex.map(c => c.uid));
+                Object.keys(lastKnownBeaconData).forEach(uid => {
+                    if (uid === myMailUid) return; // Skip self
+                    if (contactUids.has(uid)) return; // Skip contacts (already added)
+                    
+                    const b = lastKnownBeaconData[uid];
+                    if (!b || !b.timestamp) return;
+                    
+                    // Only show recent beacons (last 24 hours)
+                    const age = Date.now() - b.timestamp;
+                    if (age > 24 * 60 * 60 * 1000) return;
+                    
+                    buttons.push({
+                        label: '✉ ' + (b.name || 'UNKNOWN') + ' (UNLINKED)',
+                        action: () => composeTo(kind, uid)
+                    });
+                });
+            }
+            
+            if (buttons.length === 0) {
+                showNotification(kind === 'msg' ? 'NO RECIPIENTS AVAILABLE' : 'NO CONTACTS LINKED -- SCAN A DATACARD FIRST.');
+                return;
+            }
+            
             buttons.push({ label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} });
             showCustomPrompt(kind === 'quest' ? 'ISSUE CONTRACT TO:' : 'SELECT RECIPIENT:', buttons);
         }
