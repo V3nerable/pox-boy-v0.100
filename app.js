@@ -845,7 +845,8 @@
             if (obStep === 1) {
                 const name = document.getElementById('ob-name').value.trim();
                 if (!name) return showNotification("IDENTITY CANNOT BE BLANK.");
-                if (localStorage.getItem('pipboy-opt-in') !== 'true') return showNotification("YOU MUST AGREE TO THE SATELLITE TRACKING WAIVER TO PROCEED.");
+                // v0.140: Dev mode implies opt-in
+                if (localStorage.getItem('pipboy-opt-in') !== 'true' && localStorage.getItem('pipboy-dev-mode') !== 'true') return showNotification("YOU MUST AGREE TO THE SATELLITE TRACKING WAIVER TO PROCEED.");
                 userProfile.name = name.toUpperCase();
                 obNameCache = '';
                 obStep = 2;
@@ -3829,6 +3830,17 @@
                         className: 'pip-tooltip'
                     })
                     .addTo(markersGroup);
+                
+                // v0.140: Add click handler to remove marker (for overseer display)
+                marker.on('click', function(e) {
+                    L.DomEvent.stopPropagation(e);
+                    showCustomPrompt('REMOVE MARKER "' + wp.name.toUpperCase() + '"?', [
+                        { label: 'REMOVE IT', color: '#ff3333', action: () => {
+                            deleteWaypointById(wp.id);
+                        }},
+                        { label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} }
+                    ]);
+                });
             });
             
             // v0.55: waypoint re-renders no longer re-frame the camera. Explicit camera
@@ -3944,7 +3956,8 @@
                 stopGpsWatch('manual');
                 return;
             }
-            if (localStorage.getItem('pipboy-opt-in') !== 'true') {
+            // v0.140: Dev mode implies opt-in
+            if (localStorage.getItem('pipboy-opt-in') !== 'true' && localStorage.getItem('pipboy-dev-mode') !== 'true') {
                 showNotification("GPS TRACKING ABORTED. YOU MUST OPT-IN TO SATELLITE TRACKING TO ENABLE THIS FEATURE.");
                 return;
             }
@@ -4009,7 +4022,8 @@
         function maybeAutoGps() {
             if (gpsWatchId !== null) return;
             if (localStorage.getItem('pipboy-gps-tracking') !== '1') return;
-            if (localStorage.getItem('pipboy-opt-in') !== 'true') return;
+            // v0.140: Dev mode implies opt-in
+            if (localStorage.getItem('pipboy-opt-in') !== 'true' && localStorage.getItem('pipboy-dev-mode') !== 'true') return;
             if (!navigator.geolocation) return;
             gpsRestoredPending = true;
             startGpsWatch();
@@ -8337,6 +8351,9 @@
                         const center = pipMap.getCenter();
                         pipMap.panTo(center, {animate: false});
                     }
+                    // Show center dot overlay
+                    const centerDot = document.getElementById('overseer-center-dot');
+                    if (centerDot) centerDot.style.display = 'block';
                 }, 500);
             }
             
@@ -8359,6 +8376,10 @@
                 clearInterval(overseerRefreshInterval);
                 overseerRefreshInterval = null;
             }
+            
+            // Hide center dot overlay
+            const centerDot = document.getElementById('overseer-center-dot');
+            if (centerDot) centerDot.style.display = 'none';
             
             // Move the map back to its original location
             const mapContainer = document.getElementById('map-container');
