@@ -8202,10 +8202,16 @@
             
             document.getElementById('overseer-display-modal').style.display = 'flex';
             
+            // Ensure map is initialized before moving it
+            if (!pipMap) {
+                // Map not initialized yet - initialize it first
+                initPipMap();
+            }
+            
             // Move the main map into the overseer display
             const mapContainer = document.getElementById('map-container');
             const overseerMapContainer = document.getElementById('overseer-map-container');
-            if (mapContainer && overseerMapContainer) {
+            if (mapContainer && overseerMapContainer && pipMap) {
                 overseerMapContainer.innerHTML = ''; // Clear loading message
                 overseerMapContainer.appendChild(mapContainer);
                 mapContainer.style.width = '100%';
@@ -8219,7 +8225,7 @@
                         const center = pipMap.getCenter();
                         pipMap.panTo(center, {animate: false});
                     }
-                }, 300);
+                }, 500);
             }
             
             // Start auto-refresh
