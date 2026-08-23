@@ -1095,6 +1095,9 @@
 
         // UI & Setup
         function switchMainTab(tabId) {
+            // v0.145: Play tab switch sound
+            playSound('tabSwitch');
+            
             // Derive the active tab from the DOM (works for clicks AND programmatic calls)
             document.querySelectorAll('.nav-tabs .nav-item').forEach(el => {
                 const oc = el.getAttribute('onclick') || '';
@@ -1602,6 +1605,9 @@
         }
 
         function showNotification(msg) {
+            // v0.145: Play notification sound
+            playSound('notification');
+            
             // In-app modal (always works). v0.48 DECOUPLING: showNotification is now
             // STRICTLY in-app — before this, every UI toast ("OVERSEER MODE ENABLED",
             // "TRANSMISSION SENT"...) was ALSO an OS push + vibration, nonstop spam.
@@ -4632,6 +4638,9 @@
         }
 
         async function startCamera() {
+            // v0.145: Play camera open sound
+            playSound('cameraOpen');
+            
             const video = document.getElementById('cam-video');
             const placeholder = document.getElementById('cam-placeholder');
             const startBtn = document.getElementById('cam-start-btn');
@@ -5125,6 +5134,20 @@
             const b = document.getElementById('options-export-btn');
             if (b && localStorage.getItem('pipboy-auto-export') === '1') b.innerText = '[AUTO-EXPORT: ON]';
         })();
+        
+        // v0.145: Initialize app sounds
+        initAppSounds();
+        
+        // v0.145: Add button press sound to all pip-btn and theme-btn elements
+        document.addEventListener('click', (e) => {
+            const btn = e.target.closest('.pip-btn, .theme-btn');
+            if (btn) {
+                // Don't play sound for tab switches (they have their own sound)
+                if (!btn.classList.contains('nav-item')) {
+                    playSound('buttonPress');
+                }
+            }
+        });
 
         // ================= TEXT SIZE CYCLE (v0.44) =================
         // Every element in the app is rem-scaled, so the whole UI resizes from the root.
@@ -5754,6 +5777,43 @@
         // plays a short random SLICE of the loop instead of the whole clip.
         let geigerPool = [];
         let geigerTurn = 0;
+        
+        // v0.145: APP INTERACTION SOUNDS
+        const appSounds = {
+            tabSwitch: null,
+            cameraOpen: null,
+            notification: null,
+            buttonPress: null
+        };
+        
+        function initAppSounds() {
+            try {
+                appSounds.tabSwitch = new Audio('tab-switch.wav');
+                appSounds.cameraOpen = new Audio('camera-open.wav');
+                appSounds.notification = new Audio('notification.wav');
+                appSounds.buttonPress = new Audio('button-press.wav');
+                
+                // Preload all sounds
+                Object.values(appSounds).forEach(audio => {
+                    if (audio) audio.preload = 'auto';
+                });
+            } catch (e) {
+                console.log('App sounds unavailable:', e);
+            }
+        }
+        
+        function playSound(soundName) {
+            try {
+                const audio = appSounds[soundName];
+                if (audio) {
+                    audio.currentTime = 0;
+                    audio.play().catch(() => {}); // Ignore autoplay errors
+                }
+            } catch (e) {
+                // Silently ignore sound errors
+            }
+        }
+        
         function geigerClick() {
             try {
                 if (!geigerPool.length) {
