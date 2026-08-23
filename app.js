@@ -99,6 +99,10 @@
         // 1. Initialize state variables FIRST
         const storedItems = localStorage.getItem('pipboy-items');
         const storedQuests = localStorage.getItem('pipboy-quests');
+        // v0.142: Clear all legacy quests - no user should load with pre-added quests
+        if (storedQuests) {
+            localStorage.removeItem('pipboy-quests');
+        }
         const storedUser = localStorage.getItem('pipboy-user');
         const storedFactions = localStorage.getItem('pipboy-factions');
 
@@ -5164,6 +5168,56 @@
             document.getElementById('photo-viewer-modal').style.display = 'none';
         }
 
+        function sendViewerPhoto() {
+            if (viewerPhotoIdx === null) return;
+            const entry = photoArchive[viewerPhotoIdx];
+            if (!entry) return;
+            
+            // Open recipient picker
+            const buttons = [];
+            
+            // Add contacts
+            rolodex.forEach(c => {
+                buttons.push({
+                    label: '✉ ' + c.name + ' (CONTACT)',
+                    action: () => {
+                        closePhotoViewer();
+                        sendPhotoMail(c, entry);
+                    }
+                });
+            });
+            
+            // Add unlinked wastelanders from beacon data
+            const contactUids = new Set(rolodex.map(c => c.uid));
+            Object.keys(lastKnownBeaconData).forEach(uid => {
+                if (uid === myMailUid) return; // Skip self
+                if (contactUids.has(uid)) return; // Skip contacts (already added)
+                
+                const b = lastKnownBeaconData[uid];
+                if (!b || !b.timestamp) return;
+                
+                // Only show recent beacons (last 24 hours)
+                const age = Date.now() - b.timestamp;
+                if (age > 24 * 60 * 60 * 1000) return;
+                
+                buttons.push({
+                    label: '✉ ' + (b.name || 'UNKNOWN') + ' (UNLINKED)',
+                    action: () => {
+                        closePhotoViewer();
+                        sendPhotoMail({ uid: uid, name: b.name || 'UNKNOWN' }, entry);
+                    }
+                });
+            });
+            
+            if (buttons.length === 0) {
+                showNotification('NO RECIPIENTS AVAILABLE');
+                return;
+            }
+            
+            buttons.push({ label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} });
+            showCustomPrompt('SEND PHOTO TO:', buttons);
+        }
+
         function deleteViewerPhoto() {
             if (viewerPhotoIdx === null) return;
             const idx = viewerPhotoIdx;
@@ -6594,13 +6648,30 @@
         let photoPickTarget = null;
         let photoPickMode = 'send'; // v0.47: 'send' = one-shot photo letter; 'attach' = hand the shot back to the message composer
         function openPhotoPicker(uid) {
+            // v0.143: Allow sending photos to unlinked users
             const c = contactByUid(uid);
-            if (!c) return;
-            if (!isMutualLink(uid)) { showNotification('LINK NOT CONFIRMED BOTH WAYS YET -- THEY MUST ACCEPT YOUR DATACARD.'); return; }
-            if (!photoArchive.length) { showNotification('DATABANK EMPTY -- TAKE A PHOTO FIRST.'); return; }
+            const b = lastKnownBeaconData[uid];
+            
+            if (!c && !b) {
+                showNotification('NO CONTACT OR BEACON DATA FOR THIS USER.');
+                return;
+            }
+            
+            // Only require mutual link for contacts, not for unlinked users
+            if (c && !isMutualLink(uid)) {
+                showNotification('LINK NOT CONFIRMED BOTH WAYS YET -- THEY MUST ACCEPT YOUR DATACARD.');
+                return;
+            }
+            
+            if (!photoArchive.length) {
+                showNotification('DATABANK EMPTY -- TAKE A PHOTO FIRST.');
+                return;
+            }
+            
             photoPickMode = 'send';
             photoPickTarget = uid;
-            document.getElementById('pp-title').innerText = 'TRANSMIT PHOTO TO: ' + c.name;
+            const name = c ? c.name : (b && b.name ? b.name : 'UNKNOWN SIGNAL');
+            document.getElementById('pp-title').innerText = 'TRANSMIT PHOTO TO: ' + name + (c ? '' : ' (UNLINKED)');
             let html = '<div class="photo-tile-grid">';
             photoArchive.forEach((e, i) => { html += `<div class="photo-tile" onclick="pickPhotoForMail(${i})"><img src="${entryPip(e)}"></div>`; });
             document.getElementById('pp-grid').innerHTML = html + '</div>';
@@ -8319,6 +8390,32 @@
         // ================= v0.126 OVERSEER DISPLAY OVERLAY =================
         let overseerRefreshInterval = null;
         let overseerRefreshCountdown = 30;
+
+        function overseerAddMarker() {
+            if (!pipMap) {
+                showNotification('MAP NOT INITIALIZED');
+                return;
+            }
+            // Get center of map (where the center dot is)
+            const center = pipMap.getCenter();
+            openAddWaypointModal(center.lat, center.lng);
+        }
+
+        function overseerCenterMap() {
+            if (!pipMap) {
+                showNotification('MAP NOT INITIALIZED');
+                return;
+            }
+            // Center map on user's location if GPS is enabled
+            if (myLastLat !== null && myLastLng !== null) {
+                pipMap.setView([myLastLat, myLastLng], pipMap.getZoom());
+                showNotification('MAP CENTERED ON YOUR LOCATION');
+            } else {
+                showNotification('GPS NOT ENABLED - CANNOT CENTER');
+            }
+            // Force map refresh
+            pipMap.invalidateSize();
+        }
 
         function openOverseerDisplay() {
             if (localStorage.getItem('pipboy-dev-mode') !== 'true') {

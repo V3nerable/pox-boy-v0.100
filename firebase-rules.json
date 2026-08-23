@@ -22,7 +22,7 @@
         "$mailKey": {
           ".write": true,
           ".validate": "newData.hasChildren(['type', 'from', 'fromName', 'ts', 'payload'])",
-          "type":      { ".validate": "newData.isString() && (newData.val() == 'msg' || newData.val() == 'quest' || newData.val() == 'item' || newData.val() == 'handshake')" },
+          "type":      { ".validate": "newData.isString() && (newData.val() == 'msg' || newData.val() == 'quest' || newData.val() == 'item' || newData.val() == 'handshake' || newData.val() == 'quest-offer' || newData.val() == 'verify-request')" },
           "from":      { ".validate": "newData.isString() && newData.val().length <= 64" },
           "fromName":  { ".validate": "newData.isString() && newData.val().length <= 32" },
           "ts":        { ".validate": "newData.isNumber() && newData.val() > 1735689600000" },
