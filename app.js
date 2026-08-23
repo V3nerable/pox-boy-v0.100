@@ -1926,6 +1926,8 @@
 
             Object.keys(firebaseQuests).forEach(id => {
                 const q = firebaseQuests[id];
+                // v0.144: Filter out legacy pre-added quests
+                if (q.title === 'THE GATHERING' || q.title === 'SCAVENGER HUNT') return;
                 if (q.status !== 'open') return;
                 if (q.type === 'direct') return; // direct firebaseQuests not shown here
                 const alreadyAccepted = q.progress && q.progress[myUid];
@@ -3721,7 +3723,23 @@
                     color: color, weight: 1.5, dashArray: '6 4',
                     fillColor: color, fillOpacity: 0.07
                 }).addTo(radZonesGroup);
-                fence.on('click', (e) => { L.DomEvent.stopPropagation(e.originalEvent); selectZone(zk); });
+                fence.on('click', (e) => {
+                    L.DomEvent.stopPropagation(e.originalEvent);
+                    // v0.144: Show remove prompt for overseer mode
+                    if (localStorage.getItem('pipboy-dev-mode') === 'true') {
+                        const z = lastKnownRadZones[zk];
+                        const kind = z.kind || 'hot';
+                        const label = z.label || (kind === 'med' ? 'MED ZONE' : kind === 'decon' ? 'DECON STATION' : 'HOT ZONE');
+                        showCustomPrompt('REMOVE ' + label.toUpperCase() + '?', [
+                            { label: 'REMOVE IT', color: '#ff3333', action: () => {
+                                extinguishZone(zk);
+                            }},
+                            { label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} }
+                        ]);
+                    } else {
+                        selectZone(zk);
+                    }
+                });
                 const zoneIcon = L.divIcon({
                     className: 'custom-pip-marker',
                     html: '<div style="width: 14px; height: 14px; transform: rotate(45deg); border: 2px dashed ' + color + '; background: transparent; box-shadow: 0 0 12px ' + color + ';"></div>',
@@ -3735,7 +3753,23 @@
                         className: 'pip-tooltip'
                     })
                     .addTo(radZonesGroup);
-                zm.on('click', (e) => { L.DomEvent.stopPropagation(e.originalEvent); selectZone(zk); });
+                zm.on('click', (e) => {
+                    L.DomEvent.stopPropagation(e.originalEvent);
+                    // v0.144: Show remove prompt for overseer mode
+                    if (localStorage.getItem('pipboy-dev-mode') === 'true') {
+                        const z = lastKnownRadZones[zk];
+                        const kind = z.kind || 'hot';
+                        const label = z.label || (kind === 'med' ? 'MED ZONE' : kind === 'decon' ? 'DECON STATION' : 'HOT ZONE');
+                        showCustomPrompt('REMOVE ' + label.toUpperCase() + '?', [
+                            { label: 'REMOVE IT', color: '#ff3333', action: () => {
+                                extinguishZone(zk);
+                            }},
+                            { label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} }
+                        ]);
+                    } else {
+                        selectZone(zk);
+                    }
+                });
                 zoneMarkerRefs[zk] = zm;
                 if (zk === selectedZoneKey) zm.openTooltip(); // keep the label up across radzones/ refreshes
             });
@@ -8649,7 +8683,6 @@
 
         function renderOverseerPlayerList(players) {
             const container = document.getElementById('overseer-player-list');
-            const showNames = document.getElementById('overseer-show-names').checked;
             
             if (players.length === 0) {
                 container.innerHTML = '<p style="text-align: center; opacity: 0.5;">No players match filter</p>';
@@ -8663,7 +8696,8 @@
                 let html = '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px;">';
                 players.forEach((p, idx) => {
                     const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `${idx + 1}.`;
-                    const displayName = showNames ? escapeHtml(p.name) : 'WASTELANDER';
+                    // v0.144: Always show names (removed checkbox)
+                    const displayName = escapeHtml(p.name);
                     
                     // Status and border color based on rads
                     const isGlowing = p.rads >= 1000;
