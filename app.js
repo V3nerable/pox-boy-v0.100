@@ -5135,10 +5135,8 @@
             if (b && localStorage.getItem('pipboy-auto-export') === '1') b.innerText = '[AUTO-EXPORT: ON]';
         })();
         
-        // v0.145: Initialize app sounds
-        initAppSounds();
-        
         // v0.145: Add button press sound to all pip-btn and theme-btn elements
+        // Sounds will be initialized on first play (requires user interaction)
         document.addEventListener('click', (e) => {
             const btn = e.target.closest('.pip-btn, .theme-btn');
             if (btn) {
@@ -5779,32 +5777,38 @@
         let geigerTurn = 0;
         
         // v0.145: APP INTERACTION SOUNDS
-        const appSounds = {
-            tabSwitch: null,
-            cameraOpen: null,
-            notification: null,
-            buttonPress: null
-        };
+        let appSounds = null;
+        let soundsInitialized = false;
         
         function initAppSounds() {
+            if (soundsInitialized) return;
             try {
-                appSounds.tabSwitch = new Audio('tab-switch.wav');
-                appSounds.cameraOpen = new Audio('camera-open.wav');
-                appSounds.notification = new Audio('notification.wav');
-                appSounds.buttonPress = new Audio('button-press.wav');
+                appSounds = {
+                    tabSwitch: new Audio('tab-switch.wav'),
+                    cameraOpen: new Audio('camera-open.wav'),
+                    notification: new Audio('notification.wav'),
+                    buttonPress: new Audio('button-press.wav')
+                };
                 
                 // Preload all sounds
                 Object.values(appSounds).forEach(audio => {
                     if (audio) audio.preload = 'auto';
                 });
+                
+                soundsInitialized = true;
             } catch (e) {
                 console.log('App sounds unavailable:', e);
             }
         }
         
         function playSound(soundName) {
+            // Initialize sounds on first play (requires user interaction)
+            if (!soundsInitialized) {
+                initAppSounds();
+            }
+            
             try {
-                const audio = appSounds[soundName];
+                const audio = appSounds && appSounds[soundName];
                 if (audio) {
                     audio.currentTime = 0;
                     audio.play().catch(() => {}); // Ignore autoplay errors
