@@ -5135,12 +5135,12 @@
             if (b && localStorage.getItem('pipboy-auto-export') === '1') b.innerText = '[AUTO-EXPORT: ON]';
         })();
         
-        // v0.145: Add button press sound to all pip-btn and theme-btn elements
+        // v0.145: Add button press sound to all pip-btn, theme-btn, and sub-nav-item elements
         // Sounds will be initialized on first play (requires user interaction)
         document.addEventListener('click', (e) => {
-            const btn = e.target.closest('.pip-btn, .theme-btn');
+            const btn = e.target.closest('.pip-btn, .theme-btn, .sub-nav-item');
             if (btn) {
-                // Don't play sound for tab switches (they have their own sound)
+                // Don't play sound for main tab switches (they have their own sound)
                 if (!btn.classList.contains('nav-item')) {
                     playSound('buttonPress');
                 }
@@ -6736,10 +6736,22 @@
         // legacy links pass rather than punishing offline players).
         function isMutualLink(uid) {
             if (!contactByUid(uid)) return false;
+            
+            // Check for traditional handshake (datacard scan)
             const links = outbox.filter(e => e.type === 'handshake' && e.to === uid);
             // v1.00: 'closed' means receiver accepted and retired the letter (mutual link confirmed)
             if (links.some(e => e.status === 'accepted' || e.status === 'closed')) return true;
             if (links.some(e => e.status === 'sent' || e.status === 'queued' || e.status === 'sending')) return false;
+            
+            // v0.147: Count sent messages/photos as one way of handshake
+            // If I've sent them a message/photo, that counts as me initiating
+            const sentMessages = outbox.filter(e => e.type === 'msg' && e.to === uid && (e.status === 'sent' || e.status === 'accepted' || e.status === 'fulfilled'));
+            if (sentMessages.length > 0) {
+                // I've sent them something, and they're in my contacts (meaning they sent me something)
+                // This counts as mutual link
+                return true;
+            }
+            
             return true;
         }
 
