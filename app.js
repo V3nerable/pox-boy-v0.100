@@ -6260,19 +6260,31 @@
                 renderMailBadge();
                 if (mailTabActive()) renderMail();
             };
-            showCustomPrompt((l.fromName || 'UNKNOWN') + ' HAS SCANNED YOUR DATACARD. ADD THEM TO WASTELANDERS MET?', [
-                {
-                    label: 'ACCEPT LINK & SEND DATACARD',
-                    action: () => {
-                        addContact(safeUid(l.from), (l.fromName || 'UNKNOWN').toUpperCase());
-                        // v0.148: Automatically send datacard back to create mutual link
-                        sendHandshake(safeUid(l.from));
-                        settle();
-                        if (currentDataTab === 'wastelanders') { renderWastelanders(); renderLinkRequests(); }
-                    }
-                },
-                { label: 'IGNORE', color: 'var(--pip-color-dim)', action: settle }
-            ]);
+            
+            // v0.149: Check if sender is already in contacts
+            const senderUid = safeUid(l.from);
+            const alreadyInContacts = contactByUid(senderUid);
+            
+            if (alreadyInContacts) {
+                // Sender is already in contacts, just silently accept the handshake
+                settle();
+                showNotification('LINK CONFIRMED WITH ' + (l.fromName || 'UNKNOWN').toUpperCase());
+            } else {
+                // Sender is not in contacts, show prompt
+                showCustomPrompt((l.fromName || 'UNKNOWN') + ' HAS SCANNED YOUR DATACARD. ADD THEM TO WASTELANDERS MET?', [
+                    {
+                        label: 'ACCEPT LINK & SEND DATACARD',
+                        action: () => {
+                            addContact(senderUid, (l.fromName || 'UNKNOWN').toUpperCase());
+                            // Send datacard back to create mutual link
+                            sendHandshake(senderUid);
+                            settle();
+                            if (currentDataTab === 'wastelanders') { renderWastelanders(); renderLinkRequests(); }
+                        }
+                    },
+                    { label: 'IGNORE', color: 'var(--pip-color-dim)', action: settle }
+                ]);
+            }
         }
 
         function openMailItem(key, src) {
