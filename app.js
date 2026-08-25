@@ -6262,9 +6262,11 @@
             };
             showCustomPrompt((l.fromName || 'UNKNOWN') + ' HAS SCANNED YOUR DATACARD. ADD THEM TO WASTELANDERS MET?', [
                 {
-                    label: 'ACCEPT LINK',
+                    label: 'ACCEPT LINK & SEND DATACARD',
                     action: () => {
                         addContact(safeUid(l.from), (l.fromName || 'UNKNOWN').toUpperCase());
+                        // v0.148: Automatically send datacard back to create mutual link
+                        sendHandshake(safeUid(l.from));
                         settle();
                         if (currentDataTab === 'wastelanders') { renderWastelanders(); renderLinkRequests(); }
                     }
