@@ -3567,6 +3567,7 @@
             sharedPinsGroup = L.layerGroup().addTo(pipMap); // v0.38 broadcast marker board
             radZonesGroup = L.layerGroup().addTo(pipMap);   // v0.47 Overseer hot zones
             renderMarkers();
+            renderEventZone(); // v0.150: Render event zone fence
             // v0.63: ALWAYS show user marker on map open if we have coordinates
             // Live (solid) if GPS enabled, cold (dashed) if disabled but we have last known
             if (myLastLat !== null && myLastLng !== null && !userMarker) {
@@ -5770,6 +5771,36 @@
             }
         }
 
+        // v0.150: EVENT ZONE FENCE
+        const eventZoneCoords = [
+            [-31.56281497171507, 117.7987783018309],
+            [-31.564337049859212, 117.79923964177345],
+            [-31.564323337554384, 117.7964984242077],
+            [-31.56252243733409, 117.79621947447498],
+            [-31.56228932334234, 117.79845643675465],
+            [-31.56281497171507, 117.7987783018309] // Close the polygon
+        ];
+        
+        let eventZonePolygon = null;
+        
+        function renderEventZone() {
+            if (!pipMap) return;
+            
+            // Remove existing event zone polygon
+            if (eventZonePolygon) {
+                pipMap.removeLayer(eventZonePolygon);
+            }
+            
+            // Render event zone polygon
+            eventZonePolygon = L.polygon(eventZoneCoords, {
+                color: '#ffb642', // Orange
+                fillColor: '#ffb642',
+                fillOpacity: 0.1,
+                weight: 3,
+                dashArray: '10, 5'
+            }).addTo(pipMap);
+        }
+        
         // v0.49: REAL GEIGER VOICE — the field rattle is now the user's 24s geiger loop,
         // shipped inline as geiger.mp3 and precached by the SW (fully offline). Each dose
         // plays a short random SLICE of the loop instead of the whole clip.
