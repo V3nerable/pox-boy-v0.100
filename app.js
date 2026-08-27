@@ -2040,6 +2040,30 @@
             document.getElementById('create-quest-modal').style.display = 'flex';
             document.getElementById('cq-modal-title').innerText = 'CREATE ' + type.toUpperCase() + ' QUEST';
             
+            // v0.171: Show regular form elements and hide stage management section
+            const formGroups = ['quest-recipient-group', 'quest-target-group'];
+            formGroups.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.style.display = 'block';
+            });
+            
+            // Show individual form fields (they're inside form-group divs without IDs)
+            const formFields = ['new-quest-title', 'new-quest-desc', 'new-quest-reward'];
+            formFields.forEach(id => {
+                const el = document.getElementById(id);
+                if (el && el.parentElement) el.parentElement.style.display = 'block';
+            });
+            
+            // Show submit button directly
+            const submitBtn = document.getElementById('submit-quest-btn');
+            if (submitBtn) submitBtn.style.display = 'block';
+            
+            // Hide stage management section if it exists
+            const stageSection = document.getElementById('stage-management-section');
+            if (stageSection) {
+                stageSection.style.display = 'none';
+            }
+            
             // Clear form fields
             document.getElementById('new-quest-title').value = '';
             document.getElementById('new-quest-desc').value = '';
@@ -2103,11 +2127,41 @@
             const content = modal.querySelector('.modal-content');
             
             // v0.159: Preserve existing quest data when returning from stage edit
-            const questData = window.pendingMultiStageQuest || { title: '', description: '', timeLimit: null };
+            const questData = window.pendingMultiStageQuest || { title: '', description: '', timeLimit: null, hideLockedStages: false };
             
-            // Replace modal content with stage management UI
-            content.innerHTML = `
-                <h3 id="cq-modal-title">CREATE MULTI-STAGE QUEST</h3>
+            // v0.171: Hide regular form elements instead of replacing content
+            const formGroups = ['quest-recipient-group', 'quest-target-group'];
+            formGroups.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.style.display = 'none';
+            });
+            
+            // Hide individual form fields (they're inside form-group divs without IDs)
+            const formFields = ['new-quest-title', 'new-quest-desc', 'new-quest-reward'];
+            formFields.forEach(id => {
+                const el = document.getElementById(id);
+                if (el && el.parentElement) el.parentElement.style.display = 'none';
+            });
+            
+            // Hide submit button directly
+            const submitBtn = document.getElementById('submit-quest-btn');
+            if (submitBtn) submitBtn.style.display = 'none';
+            
+            // Update title
+            document.getElementById('cq-modal-title').innerText = 'CREATE MULTI-STAGE QUEST';
+            
+            // Create or update stage management section
+            let stageSection = document.getElementById('stage-management-section');
+            if (!stageSection) {
+                stageSection = document.createElement('div');
+                stageSection.id = 'stage-management-section';
+                // Insert before the cancel button
+                const cancelBtn = content.querySelector('button[onclick="closeModals()"]');
+                content.insertBefore(stageSection, cancelBtn);
+            }
+            
+            stageSection.style.display = 'block';
+            stageSection.innerHTML = `
                 <div class="form-group">
                     <label>QUEST TITLE</label>
                     <input type="text" id="ms-quest-title" class="pip-input vk-target" readonly onclick="openVk('ms-quest-title')" placeholder="e.g. Scavenger Hunt" value="${escapeHtml(questData.title || '')}">
@@ -2130,10 +2184,7 @@
                     <button class="pip-btn" onclick="addStage()" style="margin-top: 10px; border-style: dashed;">+ ADD STAGE</button>
                 </div>
                 <div id="ms-error" style="display: none; color: #ff3333; background: rgba(255, 51, 51, 0.1); border: 1px solid #ff3333; padding: 10px; margin-top: 15px; font-size: 0.9rem;"></div>
-                <div style="display: flex; gap: 10px; margin-top: 15px;">
-                    <button class="pip-btn" onclick="submitMultiStageQuest()" style="flex: 1;">CREATE QUEST</button>
-                    <button class="pip-btn" onclick="closeModals()" style="flex: 1; border-style: dashed;">CANCEL</button>
-                </div>
+                <button class="pip-btn" onclick="submitMultiStageQuest()" style="margin-top: 15px;">CREATE MULTI-STAGE QUEST</button>
             `;
             
             // Render stages
