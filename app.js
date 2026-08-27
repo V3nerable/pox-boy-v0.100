@@ -1857,7 +1857,10 @@
             Object.keys(firebaseQuests).forEach(id => {
                 const q = firebaseQuests[id];
                 const prog = q.progress && q.progress[myUid];
-                if (!prog || prog.status === 'rejected' || prog.status === 'verified') return;
+                if (!prog) return;
+                // v0.164: Filter out cancelled/expired quests and abandoned/rejected/verified progress
+                if (q.status === 'cancelled' || q.status === 'expired') return;
+                if (prog.status === 'rejected' || prog.status === 'verified' || prog.status === 'abandoned') return;
                 const statusText = prog.status === 'completed' ? '⏳ AWAITING VERIFICATION' : 'ACTIVE';
                 const strike = prog.status !== 'accepted' ? 'line-through' : 'none';
                 const opacity = prog.status === 'completed' ? '0.7' : '1';
@@ -1891,23 +1894,31 @@
                 </div>`);
             });
 
-            // Firebase quests with completed/rejected/verified/abandoned status
+            // Firebase quests with completed/rejected/verified/abandoned status OR cancelled/expired at quest level
             Object.keys(firebaseQuests).forEach(id => {
                 const q = firebaseQuests[id];
                 const prog = q.progress && q.progress[myUid];
-                if (!prog || prog.status === 'accepted') return;
+                if (!prog) return;
                 
+                // v0.164: Show cancelled/expired quests in completed tab
+                const isCancelled = q.status === 'cancelled';
+                const isExpired = q.status === 'expired';
                 const isVerified = prog.status === 'verified';
                 const isCompleted = prog.status === 'completed';
                 const isRejected = prog.status === 'rejected';
                 const isAbandoned = prog.status === 'abandoned';
                 
-                const statusText = isVerified ? '✓ VERIFIED' : 
+                // Only show if quest is terminal or progress is terminal
+                if (!isCancelled && !isExpired && prog.status === 'accepted') return;
+                
+                const statusText = isCancelled ? '✗ CANCELLED' :
+                                   isExpired ? '⏰ EXPIRED' :
+                                   isVerified ? '✓ VERIFIED' : 
                                    isCompleted ? '⏳ AWAITING VERIFICATION' : 
                                    isRejected ? '✗ REJECTED' : 
                                    isAbandoned ? '✗ ABANDONED' : prog.status.toUpperCase();
-                const borderColor = isVerified ? '#39ff14' : isCompleted ? '#ffb642' : '#ff3333';
-                const opacity = isVerified ? '0.6' : isRejected || isAbandoned ? '0.5' : '0.7';
+                const borderColor = isVerified ? '#39ff14' : isCompleted ? '#ffb642' : isCancelled || isExpired ? '#ff9a3c' : '#ff3333';
+                const opacity = isVerified ? '0.6' : isRejected || isAbandoned || isCancelled || isExpired ? '0.5' : '0.7';
                 
                 html.push(`<div class="item-row" style="border-color:${borderColor}; opacity:${opacity};" onclick="openQuestModal('${id}')">
                     <div style="font-weight:bold; text-decoration:line-through;">${escapeHtml(q.title)}</div>
@@ -3089,9 +3100,10 @@
                         .then(() => {
                             closeCustomPrompt();
                             showNotification('QUEST ABANDONED');
+                            // v0.165: Switch to completed tab immediately (abandoned quests go there)
                             setTimeout(() => {
-                                switchQuestTab('active');
-                                renderActiveQuests();
+                                switchQuestTab('completed');
+                                renderCompletedQuests();
                             }, 500);
                         })
                         .catch(err => showNotification('ERROR: ' + err.message));

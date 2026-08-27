@@ -169,7 +169,7 @@
           "$uid": {
             ".write": true,
             "acceptedAt":      { ".validate": "newData.isNumber()" },
-            "status":          { ".validate": "newData.isString() && (newData.val() == 'accepted' || newData.val() == 'completed' || newData.val() == 'verified' || newData.val() == 'rejected')" },
+            "status":          { ".validate": "newData.isString() && (newData.val() == 'accepted' || newData.val() == 'completed' || newData.val() == 'verified' || newData.val() == 'rejected' || newData.val() == 'abandoned')" },
             "completedAt":     { ".validate": "newData.isNumber() || newData.val() == null" },
             "completedByName": { ".validate": "newData.isString() && newData.val().length <= 32" },
             "evidencePhoto":   { ".validate": "newData.isString()" },
@@ -178,6 +178,7 @@
             "verifiedAt":      { ".validate": "newData.isNumber() || newData.val() == null" },
             "rejectedBy":      { ".validate": "newData.isString() && newData.val().length <= 64" },
             "rejectedAt":      { ".validate": "newData.isNumber() || newData.val() == null" },
+            "abandonedAt":     { ".validate": "newData.isNumber() || newData.val() == null" },
             "stages": {
               "$stageId": {
                 ".write": true,
