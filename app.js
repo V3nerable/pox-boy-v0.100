@@ -2113,6 +2113,7 @@
                     <div id="stages-list"></div>
                     <button class="pip-btn" onclick="addStage()" style="margin-top: 10px; border-style: dashed;">+ ADD STAGE</button>
                 </div>
+                <div id="ms-error" style="display: none; color: #ff3333; background: rgba(255, 51, 51, 0.1); border: 1px solid #ff3333; padding: 10px; margin-top: 15px; font-size: 0.9rem;"></div>
                 <div style="display: flex; gap: 10px; margin-top: 15px;">
                     <button class="pip-btn" onclick="submitMultiStageQuest()" style="flex: 1;">CREATE QUEST</button>
                     <button class="pip-btn" onclick="closeModals()" style="flex: 1; border-style: dashed;">CANCEL</button>
@@ -2351,72 +2352,123 @@
         }
         
         function submitMultiStageQuest() {
-            const title = document.getElementById('ms-quest-title').value.trim();
-            const description = document.getElementById('ms-quest-desc').value.trim();
-            const timeLimit = document.getElementById('ms-quest-timelimit').value.trim();
-            
-            if (!title) {
-                showNotification('QUEST TITLE REQUIRED');
-                return;
-            }
-            
-            if (window.pendingMultiStageQuest.stages.length === 0) {
-                showNotification('AT LEAST ONE STAGE REQUIRED');
-                return;
-            }
-            
-            // Validate stages
-            for (let i = 0; i < window.pendingMultiStageQuest.stages.length; i++) {
-                const stage = window.pendingMultiStageQuest.stages[i];
-                if (!stage.title) {
-                    showNotification('STAGE ' + (i + 1) + ' TITLE REQUIRED');
+            try {
+                console.log('submitMultiStageQuest called');
+                console.log('pendingMultiStageQuest:', JSON.stringify(window.pendingMultiStageQuest));
+                
+                const titleEl = document.getElementById('ms-quest-title');
+                const descEl = document.getElementById('ms-quest-desc');
+                const tlEl = document.getElementById('ms-quest-timelimit');
+                
+                const title = titleEl ? titleEl.value.trim() : '';
+                const description = descEl ? descEl.value.trim() : '';
+                const timeLimit = tlEl ? tlEl.value.trim() : '';
+                
+                // Show error inline in the form
+                const showError = (msg) => {
+                    const errorEl = document.getElementById('ms-error');
+                    if (errorEl) {
+                        errorEl.innerText = msg;
+                        errorEl.style.display = 'block';
+                    } else {
+                        // Fallback: close modal and show notification
+                        closeModals();
+                        showNotification(msg);
+                    }
+                };
+                
+                if (!title) {
+                    showError('QUEST TITLE REQUIRED');
                     return;
                 }
-                // v0.160: Bounty stages need a target
-                if (stage.type === 'bounty' && !stage.targetUid) {
-                    showNotification('STAGE ' + (i + 1) + ' NEEDS A BOUNTY TARGET');
+                
+                if (!window.pendingMultiStageQuest || !window.pendingMultiStageQuest.stages || window.pendingMultiStageQuest.stages.length === 0) {
+                    showError('AT LEAST ONE STAGE REQUIRED');
                     return;
                 }
-                // v0.160: Scan-code stages need a QR code
-                if (stage.type === 'scan-code' && !stage.qrCode) {
-                    showNotification('STAGE ' + (i + 1) + ' NEEDS A QR CODE');
+                
+                // Validate stages
+                for (let i = 0; i < window.pendingMultiStageQuest.stages.length; i++) {
+                    const stage = window.pendingMultiStageQuest.stages[i];
+                    if (!stage.title) {
+                        showError('STAGE ' + (i + 1) + ' TITLE REQUIRED');
+                        return;
+                    }
+                    // v0.160: Bounty stages need a target
+                    if (stage.type === 'bounty' && !stage.targetUid) {
+                        showError('STAGE ' + (i + 1) + ' (BOUNTY) NEEDS A TARGET — TAP EDIT DETAILS TO SELECT');
+                        return;
+                    }
+                    // v0.160: Scan-code stages need a QR code
+                    if (stage.type === 'scan-code' && !stage.qrCode) {
+                        showError('STAGE ' + (i + 1) + ' (SCAN-CODE) NEEDS A QR CODE — TAP EDIT DETAILS TO SET');
+                        return;
+                    }
+                }
+                
+                // Create multi-stage quest
+                const myUid = myMailUid;
+                const myName = userProfile.name || 'UNKNOWN';
+                
+                console.log('Creating quest with uid:', myUid, 'name:', myName);
+                
+                if (!myUid) {
+                    showError('ERROR: NO USER ID — RESTART APP');
                     return;
                 }
+                
+                if (!window.db) {
+                    showError('ERROR: NO DATABASE CONNECTION — CHECK SIGNAL');
+                    return;
+                }
+                
+                const questData = {
+                    type: 'multi-stage',
+                    title: title,
+                    description: description,
+                    issuerUid: myUid,
+                    issuerName: myName,
+                    stages: window.pendingMultiStageQuest.stages.map((stage, idx) => ({
+                        id: 'stage' + (idx + 1),
+                        type: stage.type,
+                        title: stage.title,
+                        description: stage.description || '',
+                        reward: stage.reward || null,
+                        qrCode: stage.qrCode || null,
+                        targetUid: stage.targetUid || null,
+                        targetName: stage.targetName || null,
+                        timeLimit: stage.timeLimit || null,
+                        status: idx === 0 ? 'available' : 'locked',
+                        completedBy: null,
+                        completedAt: null,
+                        verifiedBy: null,
+                        verifiedAt: null
+                    })),
+                    status: 'open',
+                    timeLimit: timeLimit ? parseInt(timeLimit) : null,
+                    createdAt: Date.now()
+                };
+                
+                console.log('Quest data:', JSON.stringify(questData));
+                
+                // Save to Firebase
+                const questRef = window.firebaseRef(window.db, 'quests');
+                window.firebasePush(questRef, questData)
+                    .then(ref => {
+                        console.log('Quest created with key:', ref.key);
+                        showNotification('MULTI-STAGE QUEST CREATED');
+                        closeModals();
+                        switchQuestTab('issued');
+                    })
+                    .catch(err => {
+                        console.error('Firebase push error:', err);
+                        showError('FIREBASE ERROR: ' + (err.message || err));
+                    });
+            } catch (err) {
+                console.error('submitMultiStageQuest error:', err);
+                closeModals();
+                showNotification('ERROR: ' + (err.message || err));
             }
-            
-            // Create multi-stage quest
-            const myUid = myMailUid;
-            const myName = userProfile.name || 'UNKNOWN';
-            
-            const questData = {
-                type: 'multi-stage',
-                title: title,
-                description: description,
-                issuerUid: myUid,
-                issuerName: myName,
-                stages: window.pendingMultiStageQuest.stages.map((stage, idx) => ({
-                    ...stage,
-                    id: 'stage' + (idx + 1),
-                    status: idx === 0 ? 'available' : 'locked',
-                    completedBy: null,
-                    completedAt: null,
-                    verifiedBy: null,
-                    verifiedAt: null
-                })),
-                status: 'open',
-                timeLimit: timeLimit ? parseInt(timeLimit) : null,
-                createdAt: Date.now()
-            };
-            
-            // Save to Firebase
-            const questRef = window.firebaseRef(window.db, 'quests');
-            window.firebasePush(questRef, questData)
-                .then(ref => {
-                    showNotification('MULTI-STAGE QUEST CREATED');
-                    closeModals();
-                    switchQuestTab('issued');
-                })
-                .catch(err => showNotification('ERROR: ' + err.message));
         }
         
         function openQuestRecipientPicker() {
