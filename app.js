@@ -2187,6 +2187,8 @@
                 description: '',
                 reward: '',
                 qrCode: null,
+                targetUid: null,
+                targetName: null,
                 timeLimit: null,
                 status: 'available'
             };
@@ -2227,6 +2229,17 @@
                     </div>`;
             }
             
+            // v0.160: Bounty stage needs target picker
+            let bountyField = '';
+            if (stage.type === 'bounty') {
+                bountyField = `
+                    <div class="form-group">
+                        <label>BOUNTY TARGET</label>
+                        <input type="text" id="edit-stage-target-display" class="pip-input" readonly placeholder="SELECT TARGET..." value="${escapeHtml(stage.targetName || '')}" onclick="pickStageBountyTarget(${idx})" style="cursor:pointer;">
+                        <input type="hidden" id="edit-stage-target" value="${stage.targetUid || ''}">
+                    </div>`;
+            }
+            
             content.innerHTML = `
                 <h3>EDIT STAGE ${idx + 1} — ${stage.type.toUpperCase()}</h3>
                 <div class="form-group">
@@ -2246,6 +2259,7 @@
                     <input type="text" id="edit-stage-timelimit" class="pip-input vk-target" readonly onclick="openVk('edit-stage-timelimit')" placeholder="e.g. 30" value="${stage.timeLimit || ''}">
                 </div>
                 ${qrField}
+                ${bountyField}
                 <div style="display: flex; gap: 10px; margin-top: 15px;">
                     <button class="pip-btn" onclick="saveStageEdit(${idx})" style="flex: 1;">SAVE STAGE</button>
                     <button class="pip-btn" onclick="cancelStageEdit()" style="flex: 1; border-style: dashed;">CANCEL</button>
@@ -2271,6 +2285,13 @@
                 if (qrEl) stage.qrCode = qrEl.value.trim() || null;
             }
             
+            if (stage.type === 'bounty') {
+                const targetEl = document.getElementById('edit-stage-target');
+                const targetDisplayEl = document.getElementById('edit-stage-target-display');
+                if (targetEl) stage.targetUid = targetEl.value || null;
+                if (targetDisplayEl) stage.targetName = targetDisplayEl.value || null;
+            }
+            
             window.editingStageIdx = null;
             showStageManagementUI();
         }
@@ -2278,6 +2299,50 @@
         function cancelStageEdit() {
             window.editingStageIdx = null;
             showStageManagementUI();
+        }
+        
+        // v0.160: Pick bounty target for multi-stage bounty stage
+        function pickStageBountyTarget(stageIdx) {
+            const buttons = [];
+            
+            // Add rolodex contacts
+            rolodex.forEach(c => {
+                buttons.push({
+                    label: c.name + ' (contact)',
+                    action: () => {
+                        const displayEl = document.getElementById('edit-stage-target-display');
+                        const hiddenEl = document.getElementById('edit-stage-target');
+                        if (displayEl) displayEl.value = c.name;
+                        if (hiddenEl) hiddenEl.value = c.uid;
+                    }
+                });
+            });
+            
+            // Add beacon wastelanders not already in rolodex
+            const rolodexUids = new Set(rolodex.map(c => c.uid));
+            Object.keys(lastKnownBeaconData).forEach(uid => {
+                if (!rolodexUids.has(uid) && uid !== myMailUid) {
+                    const beacon = lastKnownBeaconData[uid];
+                    const name = beacon.name || 'UNKNOWN';
+                    buttons.push({
+                        label: name + ' (signal)',
+                        action: () => {
+                            const displayEl = document.getElementById('edit-stage-target-display');
+                            const hiddenEl = document.getElementById('edit-stage-target');
+                            if (displayEl) displayEl.value = name;
+                            if (hiddenEl) hiddenEl.value = uid;
+                        }
+                    });
+                }
+            });
+            
+            if (buttons.length === 0) {
+                showNotification('NO KNOWN WASTELANDERS -- OPEN MAP TO DETECT SIGNALS.');
+                return;
+            }
+            
+            buttons.push({ label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} });
+            showCustomPrompt('SELECT BOUNTY TARGET:', buttons);
         }
         
         function removeStage(idx) {
@@ -2305,6 +2370,16 @@
                 const stage = window.pendingMultiStageQuest.stages[i];
                 if (!stage.title) {
                     showNotification('STAGE ' + (i + 1) + ' TITLE REQUIRED');
+                    return;
+                }
+                // v0.160: Bounty stages need a target
+                if (stage.type === 'bounty' && !stage.targetUid) {
+                    showNotification('STAGE ' + (i + 1) + ' NEEDS A BOUNTY TARGET');
+                    return;
+                }
+                // v0.160: Scan-code stages need a QR code
+                if (stage.type === 'scan-code' && !stage.qrCode) {
+                    showNotification('STAGE ' + (i + 1) + ' NEEDS A QR CODE');
                     return;
                 }
             }
@@ -2487,6 +2562,12 @@
                     return;
                 }
                 
+                // v0.160: Route multi-stage quests to dedicated handler
+                if (q.type === 'multi-stage') {
+                    openMultiStageQuestModal(id);
+                    return;
+                }
+                
                 console.log('Quest data:', q);
                 
                 const myUid = localStorage.getItem('pipboy-uid');
@@ -2562,6 +2643,252 @@
                 console.error('Error in openQuestModal:', err);
                 showNotification('ERROR OPENING QUEST: ' + err.message);
             }
+        }
+
+        // v0.160: Multi-stage quest verification system
+        function openMultiStageQuestModal(id) {
+            try {
+                const q = firebaseQuests[id];
+                if (!q || q.type !== 'multi-stage') return;
+                
+                const myUid = myMailUid;
+                if (!myUid) return;
+                
+                const prog = q.progress && q.progress[myUid];
+                const isAccepted = prog && prog.status !== 'rejected';
+                const isCompleted = prog && prog.status === 'completed';
+                const isVerified = prog && prog.status === 'verified';
+                
+                let html = `<h2>${escapeHtml(q.title)}</h2>`;
+                if (q.description) html += `<p style="opacity:0.8; margin:10px 0;">${escapeHtml(q.description)}</p>`;
+                
+                // Status header
+                let statusText = 'NOT ACCEPTED';
+                let statusColor = '#888';
+                if (isVerified) { statusText = 'VERIFIED'; statusColor = '#5fc98e'; }
+                else if (isCompleted) { statusText = 'AWAITING VERIFICATION'; statusColor = '#ffb642'; }
+                else if (isAccepted) { statusText = 'IN PROGRESS'; statusColor = '#42b6ff'; }
+                
+                html += `<div style="padding:10px; margin:15px 0; border:1px solid ${statusColor}; text-align:center;">
+                    <div style="color:${statusColor}; font-weight:bold; font-size:1.1em;">${statusText}</div>
+                    ${q.reward ? `<div style="opacity:0.8; margin-top:5px;">Reward: ${escapeHtml(q.reward)}</div>` : ''}
+                </div>`;
+                
+                // Stages list
+                html += `<h3 style="margin-top:20px;">STAGES</h3>`;
+                const stages = q.stages || [];
+                const userStages = (prog && prog.stages) || {};
+                
+                let currentStageIdx = -1;
+                stages.forEach((stage, idx) => {
+                    const userStage = userStages[stage.id] || {};
+                    const stageStatus = userStage.status || (idx === 0 ? 'available' : 'locked');
+                    
+                    let statusIcon = '🔒';
+                    let statusText = 'LOCKED';
+                    let statusColor = '#666';
+                    
+                    if (stageStatus === 'completed') {
+                        statusIcon = '✓';
+                        statusText = 'COMPLETED';
+                        statusColor = '#5fc98e';
+                    } else if (stageStatus === 'available') {
+                        statusIcon = '○';
+                        statusText = 'IN PROGRESS';
+                        statusColor = '#42b6ff';
+                        if (currentStageIdx === -1) currentStageIdx = idx;
+                    }
+                    
+                    html += `<div style="padding:12px; margin:10px 0; border-left:3px solid ${statusColor}; background:rgba(0,0,0,0.3);">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <div style="font-weight:bold;">${statusIcon} Stage ${idx + 1}: ${escapeHtml(stage.title)}</div>
+                            <div style="color:${statusColor}; font-size:0.9em;">${statusText}</div>
+                        </div>
+                        <div style="opacity:0.8; margin-top:5px; font-size:0.9em;">${escapeHtml(stage.description || '')}</div>
+                        <div style="opacity:0.6; margin-top:5px; font-size:0.85em;">Type: ${stage.type.toUpperCase()}</div>
+                        ${stage.reward ? `<div style="opacity:0.7; margin-top:3px; font-size:0.85em;">Stage Reward: ${escapeHtml(stage.reward)}</div>` : ''}
+                    </div>`;
+                });
+                
+                // Action buttons
+                const buttons = [];
+                
+                if (!isAccepted) {
+                    buttons.push({ label: 'ACCEPT QUEST', action: () => acceptMultiStageQuest(id) });
+                } else if (isAccepted && !isCompleted && !isVerified && currentStageIdx >= 0) {
+                    const currentStage = stages[currentStageIdx];
+                    
+                    if (currentStage.type === 'photo' || currentStage.type === 'location') {
+                        buttons.push({ 
+                            label: `📷 SUBMIT ${currentStage.type.toUpperCase()} EVIDENCE`, 
+                            action: () => submitMultiStagePhoto(id, currentStageIdx) 
+                        });
+                    } else if (currentStage.type === 'bounty') {
+                        buttons.push({ 
+                            label: `🎯 SCAN BOUNTY TARGET`, 
+                            action: () => scanMultiStageBountyTarget(id, currentStageIdx) 
+                        });
+                    } else if (currentStage.type === 'scan-code') {
+                        buttons.push({ 
+                            label: `📱 SCAN QR CODE`, 
+                            action: () => scanMultiStageCode(id, currentStageIdx) 
+                        });
+                    }
+                    
+                    buttons.push({ label: 'ABANDON QUEST', color: '#ff3333', action: () => abandonQuest(id) });
+                }
+                
+                buttons.push({ label: 'CLOSE', action: () => {} });
+                
+                showCustomPrompt(html, buttons);
+            } catch (err) {
+                console.error('Error in openMultiStageQuestModal:', err);
+                showNotification('ERROR OPENING MULTI-STAGE QUEST: ' + err.message);
+            }
+        }
+
+        // v0.160: Accept multi-stage quest and initialize stage progress
+        function acceptMultiStageQuest(id) {
+            const myUid = myMailUid;
+            if (!myUid) return;
+            
+            const q = firebaseQuests[id];
+            if (!q) return;
+            
+            const stages = q.stages || [];
+            const stageProgress = {};
+            stages.forEach((stage, idx) => {
+                stageProgress[stage.id] = {
+                    status: idx === 0 ? 'available' : 'locked',
+                    completedAt: null,
+                    evidencePhoto: null,
+                    evidenceScan: null
+                };
+            });
+            
+            const progressData = {
+                status: 'accepted',
+                acceptedAt: Date.now(),
+                stages: stageProgress
+            };
+            
+            const progRef = window.firebaseRef(window.db, `quests/${id}/progress/${myUid}`);
+            window.firebaseSet(progRef, progressData)
+                .then(() => {
+                    closeCustomPrompt();
+                    showNotification('QUEST ACCEPTED');
+                    playSound('lunchbox');
+                    setTimeout(() => openMultiStageQuestModal(id), 500);
+                })
+                .catch(err => showNotification('ERROR ACCEPTING QUEST: ' + err.message));
+        }
+
+        // v0.160: Submit photo evidence for location/photo stages
+        function submitMultiStagePhoto(questId, stageIdx) {
+            window.pendingMultiStageEvidence = { questId, stageIdx };
+            closeCustomPrompt();
+            
+            // Open camera tab
+            document.querySelectorAll('.main-tab').forEach(t => t.classList.remove('active'));
+            document.getElementById('tab-cam').classList.add('active');
+            startCamera();
+            
+            showNotification('TAKE PHOTO EVIDENCE FOR STAGE ' + (stageIdx + 1));
+        }
+
+        // v0.160: Scan bounty target for bounty stages
+        function scanMultiStageBountyTarget(questId, stageIdx) {
+            window.pendingMultiStageBounty = { questId, stageIdx };
+            closeCustomPrompt();
+            
+            // Open scanner
+            document.querySelectorAll('.main-tab').forEach(t => t.classList.remove('active'));
+            document.getElementById('tab-scan').classList.add('active');
+            startQRScanner();
+            
+            showNotification('SCAN TARGET DATACARD FOR STAGE ' + (stageIdx + 1));
+        }
+
+        // v0.160: Scan QR code for scan-code stages
+        function scanMultiStageCode(questId, stageIdx) {
+            window.pendingMultiStageScanCode = { questId, stageIdx };
+            closeCustomPrompt();
+            
+            // Open scanner
+            document.querySelectorAll('.main-tab').forEach(t => t.classList.remove('active'));
+            document.getElementById('tab-scan').classList.add('active');
+            startQRScanner();
+            
+            showNotification('SCAN QR CODE FOR STAGE ' + (stageIdx + 1));
+        }
+
+        // v0.160: Complete a multi-stage stage and advance to next
+        function completeMultiStageStage(questId, stageIdx, evidence) {
+            const myUid = myMailUid;
+            if (!myUid) return;
+            
+            const q = firebaseQuests[questId];
+            if (!q) return;
+            
+            const stages = q.stages || [];
+            const stage = stages[stageIdx];
+            if (!stage) return;
+            
+            // Mark current stage as completed
+            const stageUpdate = {
+                status: 'completed',
+                completedAt: Date.now()
+            };
+            
+            if (evidence) {
+                if (evidence.photo) stageUpdate.evidencePhoto = evidence.photo;
+                if (evidence.scan) stageUpdate.evidenceScan = evidence.scan;
+            }
+            
+            const updates = {};
+            updates[`stages/${stage.id}`] = stageUpdate;
+            
+            // Unlock next stage if exists
+            if (stageIdx + 1 < stages.length) {
+                const nextStage = stages[stageIdx + 1];
+                updates[`stages/${nextStage.id}/status`] = 'available';
+            } else {
+                // All stages complete - mark quest as completed
+                updates.status = 'completed';
+                updates.completedAt = Date.now();
+            }
+            
+            const progRef = window.firebaseRef(window.db, `quests/${questId}/progress/${myUid}`);
+            window.firebaseUpdate(progRef, updates)
+                .then(() => {
+                    playSound('level-up');
+                    
+                    if (stageIdx + 1 < stages.length) {
+                        showNotification(`STAGE ${stageIdx + 1} COMPLETED! ADVANCING TO STAGE ${stageIdx + 2}`);
+                        setTimeout(() => openMultiStageQuestModal(questId), 500);
+                    } else {
+                        showNotification('ALL STAGES COMPLETED! QUEST SUBMITTED FOR VERIFICATION');
+                        sendMultiStageVerificationRequest(questId);
+                    }
+                })
+                .catch(err => showNotification('ERROR COMPLETING STAGE: ' + err.message));
+        }
+
+        // v0.160: Send verification request to issuer when multi-stage quest is complete
+        function sendMultiStageVerificationRequest(questId) {
+            const q = firebaseQuests[questId];
+            if (!q || !q.issuerUid) return;
+            
+            const myName = userProfile.name || 'UNKNOWN';
+            
+            // Use queueMail to send verify-request (consistent with regular quest completion)
+            queueMail(q.issuerUid, 'verify-request', {
+                questId: questId,
+                title: q.title,
+                completedByName: myName,
+                completedAt: Date.now(),
+                multiStage: true
+            }, 'VERIFY: ' + q.title + ' COMPLETED BY ' + myName);
         }
 
         function openIssuedQuestModal(id) {
@@ -3604,6 +3931,32 @@
         function onScanSuccess(decodedText, decodedResult) {
             stopQRScanner();
             document.getElementById('qr-scan-modal').style.display = 'none';
+
+            // v0.160: Handle multi-stage scan-code verification
+            if (window.pendingMultiStageScanCode) {
+                const pending = window.pendingMultiStageScanCode;
+                window.pendingMultiStageScanCode = null;
+                
+                const q = firebaseQuests[pending.questId];
+                if (!q || q.type !== 'multi-stage') {
+                    showNotification('QUEST NOT FOUND');
+                    return;
+                }
+                
+                const stage = q.stages[pending.stageIdx];
+                if (!stage || stage.type !== 'scan-code') {
+                    showNotification('INVALID STAGE');
+                    return;
+                }
+                
+                // Check if scanned code matches
+                if (decodedText === stage.qrCode) {
+                    completeMultiStageStage(pending.questId, pending.stageIdx, { scan: decodedText });
+                } else {
+                    showNotification('WRONG QR CODE - SCAN THE CORRECT CODE FOR THIS STAGE');
+                }
+                return;
+            }
 
             // v0.31: profile datacards are plain-text, not JSON — route them first
             if (typeof decodedText === 'string' && decodedText.indexOf('poxboy:') === 0) {
@@ -5185,6 +5538,25 @@
                 // save step exists anymore, so 'save' is live by construction
                 archiveShot(canvas);
 
+                // v0.160: Check if this is multi-stage evidence photo
+                if (window.pendingMultiStageEvidence) {
+                    const pending = window.pendingMultiStageEvidence;
+                    window.pendingMultiStageEvidence = null;
+                    
+                    // Get the photo data URL from the canvas
+                    const photoDataUrl = canvas.toDataURL('image/jpeg', 0.7);
+                    
+                    // Complete the stage with this photo
+                    completeMultiStageStage(pending.questId, pending.stageIdx, { photo: photoDataUrl });
+                    
+                    // Switch back to data tab
+                    setTimeout(() => {
+                        document.querySelectorAll('.main-tab').forEach(t => t.classList.remove('active'));
+                        document.getElementById('tab-data').classList.add('active');
+                    }, 1000);
+                    return;
+                }
+
                 // v0.119: Check if we should reopen photo picker after snap
                 if (window.reopenPickerAfterSnap) {
                     window.reopenPickerAfterSnap = false;
@@ -5774,6 +6146,32 @@
             const name = (sep > -1 ? rest.slice(sep + 1) : 'UNKNOWN WASTELANDER').toUpperCase();
             if (!uid) { showNotification('DATACARD CORRUPTED. RESCAN.'); return; }
             if (uid === myMailUid) { showNotification('THAT IS YOUR OWN DATACARD, WASTELANDER.'); return; }
+            
+            // v0.160: Check for pending multi-stage bounty scan
+            if (window.pendingMultiStageBounty) {
+                const pending = window.pendingMultiStageBounty;
+                window.pendingMultiStageBounty = null;
+                
+                const q = firebaseQuests[pending.questId];
+                if (!q || q.type !== 'multi-stage') {
+                    showNotification('QUEST NOT FOUND');
+                    return;
+                }
+                
+                const stage = q.stages[pending.stageIdx];
+                if (!stage || stage.type !== 'bounty') {
+                    showNotification('INVALID STAGE');
+                    return;
+                }
+                
+                // Check if scanned datacard matches target
+                if (uid === stage.targetUid) {
+                    completeMultiStageStage(pending.questId, pending.stageIdx, { scan: uid });
+                } else {
+                    showNotification('WRONG TARGET - THIS IS NOT THE BOUNTY TARGET');
+                }
+                return;
+            }
             
             // v0.91: Check for pending bounty scan (unified quest system)
             if (handleBountyScan(uid)) return;
