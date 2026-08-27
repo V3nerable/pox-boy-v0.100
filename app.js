@@ -2827,14 +2827,59 @@
 
         // v0.160: Submit photo evidence for location/photo stages
         function submitMultiStagePhoto(questId, stageIdx) {
-            window.pendingMultiStageEvidence = { questId, stageIdx };
+            // v0.163: Give user choice between databank and take new photo
             closeCustomPrompt();
+            showCustomPrompt('HOW DO YOU WANT TO PROVIDE EVIDENCE?', [
+                { label: '📷 TAKE NEW PHOTO', action: () => {
+                    window.pendingMultiStageEvidence = { questId, stageIdx };
+                    switchMainTab('cam');
+                    startCamera();
+                    showNotification('TAKE PHOTO EVIDENCE FOR STAGE ' + (stageIdx + 1));
+                }},
+                { label: '🖼️ PICK FROM DATABANK', action: () => {
+                    window.pendingMultiStageEvidence = { questId, stageIdx };
+                    openMultiStagePhotoPicker(questId, stageIdx);
+                }},
+                { label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} }
+            ]);
+        }
+
+        // v0.163: Photo picker for multi-stage evidence
+        function openMultiStagePhotoPicker(questId, stageIdx) {
+            if (!photoArchive.length) {
+                showNotification('DATABANK EMPTY - TAKE A PHOTO FIRST');
+                return;
+            }
             
-            // v0.161: Use proper tab switching instead of manual class manipulation
-            switchMainTab('cam');
-            startCamera();
+            const modal = document.getElementById('photo-pick-modal');
+            if (!modal) return;
             
-            showNotification('TAKE PHOTO EVIDENCE FOR STAGE ' + (stageIdx + 1));
+            document.getElementById('pp-title').innerText = 'SELECT EVIDENCE PHOTO';
+            let html = '<div class="photo-tile-grid">';
+            photoArchive.forEach((e, i) => {
+                html += `<div class="photo-tile" onclick="pickMultiStagePhoto(${i})"><img src="${entryPip(e)}"></div>`;
+            });
+            html += '</div>';
+            document.getElementById('pp-grid').innerHTML = html;
+            modal.style.display = 'flex';
+        }
+
+        // v0.163: Pick photo from databank for multi-stage evidence
+        function pickMultiStagePhoto(idx) {
+            const pending = window.pendingMultiStageEvidence;
+            if (!pending) return;
+            
+            window.pendingMultiStageEvidence = null;
+            document.getElementById('photo-pick-modal').style.display = 'none';
+            
+            // Get photo data URL
+            const photoDataUrl = photoArchive[idx];
+            
+            // Complete the stage
+            completeMultiStageStage(pending.questId, pending.stageIdx, { photo: photoDataUrl });
+            
+            // Switch to data tab
+            switchMainTab('data');
         }
 
         // v0.160: Scan bounty target for bounty stages
@@ -2895,6 +2940,7 @@
                 // All stages complete - mark quest as completed
                 updates.status = 'completed';
                 updates.completedAt = Date.now();
+                updates.completedByName = userProfile.name || 'UNKNOWN'; // v0.163: Add name for issuer
             }
             
             const progRef = window.firebaseRef(window.db, `quests/${questId}/progress/${myUid}`);
@@ -2933,7 +2979,7 @@
         function openIssuedQuestModal(id) {
             const q = firebaseQuests[id];
             if (!q) return;
-            const myUid = localStorage.getItem('pipboy-uid');
+            const myUid = myMailUid; // v0.163: Use myMailUid instead of localStorage
             const isDev = localStorage.getItem('pipboy-dev-mode') === 'true';
             const buttons = [];
             
@@ -2975,7 +3021,26 @@
                 text += `\n\n━━━ PENDING VERIFICATIONS (${pendingVerifications.length}) ━━━`;
                 pendingVerifications.forEach(p => {
                     text += `\n\nCOMPLETED BY: ${escapeHtml(p.completedByName || 'UNKNOWN')}`;
-                    if (p.evidencePhoto) text += `\n📷 EVIDENCE ATTACHED`;
+                    
+                    // v0.163: Handle multi-stage quests - show stage evidence
+                    if (q.type === 'multi-stage' && p.stages) {
+                        const stages = q.stages || [];
+                        let hasEvidence = false;
+                        stages.forEach((stage, idx) => {
+                            const stageProgress = p.stages[stage.id] || {};
+                            if (stageProgress.evidencePhoto || stageProgress.evidenceScan) {
+                                hasEvidence = true;
+                                text += `\n  Stage ${idx + 1} (${stage.type}): `;
+                                if (stageProgress.evidencePhoto) text += '📷';
+                                if (stageProgress.evidenceScan) text += '✓SCAN';
+                            }
+                        });
+                        if (!hasEvidence) text += `\n  NO EVIDENCE ATTACHED`;
+                    } else {
+                        // Regular quest - check quest-level evidence
+                        if (p.evidencePhoto) text += `\n📷 EVIDENCE ATTACHED`;
+                    }
+                    
                     buttons.push({ 
                         label: `VERIFY ${p.completedByName || 'UNKNOWN'}`, 
                         color: '#39ff14', 
@@ -3092,13 +3157,26 @@
 
         function verifyQuest(id, uid) {
             const isDev = localStorage.getItem('pipboy-dev-mode') === 'true';
-            const myUid = localStorage.getItem('pipboy-uid');
+            const myUid = myMailUid; // v0.163: Use myMailUid
             const q = firebaseQuests[id];
             if (q.issuerUid !== myUid && !isDev) {
                 showNotification('ONLY ISSUER OR OVERSEER CAN VERIFY');
                 return;
             }
-            showCustomPrompt('VERIFY THIS COMPLETION?', [
+            
+            // v0.163: Build evidence description for multi-stage quests
+            let evidenceDesc = '';
+            const prog = q.progress && q.progress[uid];
+            if (q.type === 'multi-stage' && prog && prog.stages) {
+                const stages = q.stages || [];
+                stages.forEach((stage, idx) => {
+                    const sp = prog.stages[stage.id] || {};
+                    if (sp.evidencePhoto) evidenceDesc += `\nStage ${idx + 1}: 📷 Photo attached`;
+                    if (sp.evidenceScan) evidenceDesc += `\nStage ${idx + 1}: ✓ Scan verified`;
+                });
+            }
+            
+            showCustomPrompt('VERIFY THIS COMPLETION?' + (evidenceDesc ? '\n\nEVIDENCE:' + evidenceDesc : ''), [
                 { label: 'VERIFY', color: '#39ff14', action: () => {
                     const progRef = window.firebaseRef(window.db, `quests/${id}/progress/${uid}`);
                     window.firebaseUpdate(progRef, {
@@ -3115,8 +3193,10 @@
                         .catch(err => showNotification('ERROR: ' + err.message));
                 }},
                 { label: 'VIEW EVIDENCE FIRST', action: () => {
-                    const prog = q.progress && q.progress[uid];
-                    if (prog && prog.evidencePhoto) {
+                    // v0.163: Handle multi-stage evidence
+                    if (q.type === 'multi-stage' && prog && prog.stages) {
+                        viewMultiStageEvidence(q, prog);
+                    } else if (prog && prog.evidencePhoto) {
                         viewEvidencePhoto(prog.evidencePhoto);
                     } else {
                         showNotification('NO EVIDENCE PHOTO ATTACHED');
@@ -3126,9 +3206,40 @@
             ]);
         }
 
+        // v0.163: View all evidence photos from multi-stage quest
+        function viewMultiStageEvidence(q, prog) {
+            const stages = q.stages || [];
+            const photos = [];
+            stages.forEach((stage, idx) => {
+                const sp = prog.stages[stage.id] || {};
+                if (sp.evidencePhoto) {
+                    photos.push({ stage: idx + 1, title: stage.title, photo: sp.evidencePhoto });
+                }
+            });
+            
+            if (photos.length === 0) {
+                showNotification('NO EVIDENCE PHOTOS ATTACHED');
+                return;
+            }
+            
+            // Show first photo with navigation
+            let currentIdx = 0;
+            const showPhoto = () => {
+                const p = photos[currentIdx];
+                const label = photos.length > 1 ? ` (${currentIdx + 1}/${photos.length})` : '';
+                showCustomPrompt(`STAGE ${p.stage}: ${escapeHtml(p.title)}${label}`, [
+                    { label: 'VIEW PHOTO', action: () => viewEvidencePhoto(p.photo) },
+                    ...(photos.length > 1 && currentIdx < photos.length - 1 ? [{ label: 'NEXT PHOTO →', action: () => { currentIdx++; showPhoto(); }}] : []),
+                    ...(photos.length > 1 && currentIdx > 0 ? [{ label: '← PREV PHOTO', action: () => { currentIdx--; showPhoto(); }}] : []),
+                    { label: 'BACK', color: 'var(--pip-color-dim)', action: () => {} }
+                ]);
+            };
+            showPhoto();
+        }
+
         function rejectQuest(id, uid) {
             const isDev = localStorage.getItem('pipboy-dev-mode') === 'true';
-            const myUid = localStorage.getItem('pipboy-uid');
+            const myUid = myMailUid; // v0.163: Use myMailUid
             const q = firebaseQuests[id];
             if (q.issuerUid !== myUid && !isDev) {
                 showNotification('ONLY ISSUER OR OVERSEER CAN REJECT');

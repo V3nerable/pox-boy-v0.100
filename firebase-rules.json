@@ -139,6 +139,7 @@
         "targetUid":     { ".validate": "newData.isString() && newData.val().length <= 64" },
         "targetName":    { ".validate": "newData.isString() && newData.val().length <= 32" },
         "expiresAt":     { ".validate": "newData.isNumber() || newData.val() == null" },
+        "expiredAt":     { ".validate": "newData.isNumber() || newData.val() == null" },
         "timeLimit":     { ".validate": "newData.isNumber() || newData.val() == null" },
         "createdAt":     { ".validate": "newData.isNumber() && newData.val() > 1735689600000" },
         "removedReason": { ".validate": "newData.isString() && newData.val().length <= 100" },
