@@ -293,7 +293,7 @@
         .split-view {
             display: flex;
             flex-direction: column;
-            gap: 15px;
+            gap: 0; /* v0.168: Remove gap in portrait */
             height: 100%;
             margin-bottom: 0;
         }
@@ -304,12 +304,18 @@
             width: 100%;
             display: flex;
             flex-direction: column;
+            margin-bottom: 10px; /* v0.168: Space below controls in portrait */
+        }
+        .split-wastelanders {
+            width: 100%;
+            margin-top: 10px; /* v0.168: Space above wastelanders in portrait */
         }
         .landscape-only { display: none; }
 
         @media (orientation: landscape) {
             .split-view {
                 flex-direction: row;
+                gap: 15px; /* v0.168: Add gap back in landscape */
             }
             .split-main {
                 flex: 2; /* 66% width */
@@ -323,6 +329,11 @@
                 border-left: 2px dashed var(--pip-color-dim);
                 padding-left: 15px;
                 overflow-y: auto;
+                margin-bottom: 0; /* v0.168: No margin in landscape */
+                order: -1; /* v0.168: Controls on left side */
+            }
+            .split-wastelanders {
+                display: none; /* v0.168: Hide in landscape (not enough space) */
             }
             
             /* Expand the Map/Video to completely fill their new 66% flex box */

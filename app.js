@@ -3093,11 +3093,10 @@
                 { label: 'ABANDON QUEST', color: '#ff3333', action: () => {
                     const myUid = myMailUid; // Use myMailUid instead of localStorage
                     const progRef = window.firebaseRef(window.db, `quests/${id}/progress/${myUid}`);
-                    // v0.166: Use firebaseSet to create entry if it doesn't exist (fixes permission denied)
-                    window.firebaseSet(progRef, {
+                    // v0.167: Use firebaseUpdate to only update status fields (keeps existing data)
+                    window.firebaseUpdate(progRef, {
                         status: 'abandoned',
-                        abandonedAt: Date.now(),
-                        acceptedAt: Date.now() // Required field for validation
+                        abandonedAt: Date.now()
                     })
                         .then(() => {
                             closeCustomPrompt();
@@ -3108,7 +3107,10 @@
                                 renderCompletedQuests();
                             }, 500);
                         })
-                        .catch(err => showNotification('ERROR: ' + err.message));
+                        .catch(err => {
+                            console.error('Abandon quest error:', err);
+                            showNotification('ERROR: ' + err.message);
+                        });
                 }},
                 { label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} }
             ]);
