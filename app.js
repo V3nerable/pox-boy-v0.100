@@ -2711,23 +2711,21 @@
                 const isCompleted = prog && prog.status === 'completed';
                 const isVerified = prog && prog.status === 'verified';
                 
-                let html = `<h2>${escapeHtml(q.title)}</h2>`;
-                if (q.description) html += `<p style="opacity:0.8; margin:10px 0;">${escapeHtml(q.description)}</p>`;
+                // Build plain text (showCustomPrompt uses innerText which escapes HTML)
+                let text = `${escapeHtml(q.title)}\n`;
+                if (q.description) text += `\n${escapeHtml(q.description)}\n`;
                 
-                // Status header
+                // Status
                 let statusText = 'NOT ACCEPTED';
-                let statusColor = '#888';
-                if (isVerified) { statusText = 'VERIFIED'; statusColor = '#5fc98e'; }
-                else if (isCompleted) { statusText = 'AWAITING VERIFICATION'; statusColor = '#ffb642'; }
-                else if (isAccepted) { statusText = 'IN PROGRESS'; statusColor = '#42b6ff'; }
+                if (isVerified) { statusText = '✓ VERIFIED'; }
+                else if (isCompleted) { statusText = '⏳ AWAITING VERIFICATION'; }
+                else if (isAccepted) { statusText = 'IN PROGRESS'; }
                 
-                html += `<div style="padding:10px; margin:15px 0; border:1px solid ${statusColor}; text-align:center;">
-                    <div style="color:${statusColor}; font-weight:bold; font-size:1.1em;">${statusText}</div>
-                    ${q.reward ? `<div style="opacity:0.8; margin-top:5px;">Reward: ${escapeHtml(q.reward)}</div>` : ''}
-                </div>`;
+                text += `\n[${statusText}]`;
+                if (q.reward) text += `\nReward: ${escapeHtml(q.reward)}`;
                 
                 // Stages list
-                html += `<h3 style="margin-top:20px;">STAGES</h3>`;
+                text += '\n\n━━━ STAGES ━━━\n';
                 const stages = q.stages || [];
                 const userStages = (prog && prog.stages) || {};
                 
@@ -2737,29 +2735,21 @@
                     const stageStatus = userStage.status || (idx === 0 ? 'available' : 'locked');
                     
                     let statusIcon = '🔒';
-                    let statusText = 'LOCKED';
-                    let statusColor = '#666';
+                    let statusLabel = 'LOCKED';
                     
                     if (stageStatus === 'completed') {
                         statusIcon = '✓';
-                        statusText = 'COMPLETED';
-                        statusColor = '#5fc98e';
+                        statusLabel = 'COMPLETED';
                     } else if (stageStatus === 'available') {
                         statusIcon = '○';
-                        statusText = 'IN PROGRESS';
-                        statusColor = '#42b6ff';
+                        statusLabel = 'IN PROGRESS';
                         if (currentStageIdx === -1) currentStageIdx = idx;
                     }
                     
-                    html += `<div style="padding:12px; margin:10px 0; border-left:3px solid ${statusColor}; background:rgba(0,0,0,0.3);">
-                        <div style="display:flex; justify-content:space-between; align-items:center;">
-                            <div style="font-weight:bold;">${statusIcon} Stage ${idx + 1}: ${escapeHtml(stage.title)}</div>
-                            <div style="color:${statusColor}; font-size:0.9em;">${statusText}</div>
-                        </div>
-                        <div style="opacity:0.8; margin-top:5px; font-size:0.9em;">${escapeHtml(stage.description || '')}</div>
-                        <div style="opacity:0.6; margin-top:5px; font-size:0.85em;">Type: ${stage.type.toUpperCase()}</div>
-                        ${stage.reward ? `<div style="opacity:0.7; margin-top:3px; font-size:0.85em;">Stage Reward: ${escapeHtml(stage.reward)}</div>` : ''}
-                    </div>`;
+                    text += `\n${statusIcon} Stage ${idx + 1}: ${escapeHtml(stage.title)} [${statusLabel}]`;
+                    if (stage.description) text += `\n   ${escapeHtml(stage.description)}`;
+                    text += `\n   Type: ${stage.type.toUpperCase()}`;
+                    if (stage.reward) text += `\n   Reward: ${escapeHtml(stage.reward)}`;
                 });
                 
                 // Action buttons
@@ -2792,7 +2782,7 @@
                 
                 buttons.push({ label: 'CLOSE', action: () => {} });
                 
-                showCustomPrompt(html, buttons);
+                showCustomPrompt(text, buttons);
             } catch (err) {
                 console.error('Error in openMultiStageQuestModal:', err);
                 showNotification('ERROR OPENING MULTI-STAGE QUEST: ' + err.message);
@@ -2840,9 +2830,8 @@
             window.pendingMultiStageEvidence = { questId, stageIdx };
             closeCustomPrompt();
             
-            // Open camera tab
-            document.querySelectorAll('.main-tab').forEach(t => t.classList.remove('active'));
-            document.getElementById('tab-cam').classList.add('active');
+            // v0.161: Use proper tab switching instead of manual class manipulation
+            switchMainTab('cam');
             startCamera();
             
             showNotification('TAKE PHOTO EVIDENCE FOR STAGE ' + (stageIdx + 1));
@@ -2853,9 +2842,8 @@
             window.pendingMultiStageBounty = { questId, stageIdx };
             closeCustomPrompt();
             
-            // Open scanner
-            document.querySelectorAll('.main-tab').forEach(t => t.classList.remove('active'));
-            document.getElementById('tab-scan').classList.add('active');
+            // v0.161: Use proper tab switching
+            switchMainTab('scan');
             startQRScanner();
             
             showNotification('SCAN TARGET DATACARD FOR STAGE ' + (stageIdx + 1));
@@ -2866,9 +2854,8 @@
             window.pendingMultiStageScanCode = { questId, stageIdx };
             closeCustomPrompt();
             
-            // Open scanner
-            document.querySelectorAll('.main-tab').forEach(t => t.classList.remove('active'));
-            document.getElementById('tab-scan').classList.add('active');
+            // v0.161: Use proper tab switching
+            switchMainTab('scan');
             startQRScanner();
             
             showNotification('SCAN QR CODE FOR STAGE ' + (stageIdx + 1));
@@ -5598,14 +5585,14 @@
                     // Get the photo data URL from the canvas
                     const photoDataUrl = canvas.toDataURL('image/jpeg', 0.7);
                     
+                    // v0.161: Properly stop camera and clean up UI BEFORE switching tabs
+                    stopCamera();
+                    
                     // Complete the stage with this photo
                     completeMultiStageStage(pending.questId, pending.stageIdx, { photo: photoDataUrl });
                     
-                    // Switch back to data tab
-                    setTimeout(() => {
-                        document.querySelectorAll('.main-tab').forEach(t => t.classList.remove('active'));
-                        document.getElementById('tab-data').classList.add('active');
-                    }, 1000);
+                    // v0.161: Use proper tab switching
+                    switchMainTab('data');
                     return;
                 }
 
