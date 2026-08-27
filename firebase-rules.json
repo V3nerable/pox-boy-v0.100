@@ -141,6 +141,7 @@
         "expiresAt":     { ".validate": "newData.isNumber() || newData.val() == null" },
         "expiredAt":     { ".validate": "newData.isNumber() || newData.val() == null" },
         "timeLimit":     { ".validate": "newData.isNumber() || newData.val() == null" },
+        "hideLockedStages": { ".validate": "newData.isBoolean() || newData.val() == null" },
         "createdAt":     { ".validate": "newData.isNumber() && newData.val() > 1735689600000" },
         "removedReason": { ".validate": "newData.isString() && newData.val().length <= 100" },
         "removedAt":     { ".validate": "newData.isNumber() || newData.val() == null" },

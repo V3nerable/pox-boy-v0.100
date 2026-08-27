@@ -2076,7 +2076,8 @@
                 title: '',
                 description: '',
                 stages: [],
-                timeLimit: null
+                timeLimit: null,
+                hideLockedStages: false
             };
             
             // Show multi-stage quest creation modal
@@ -2118,6 +2119,10 @@
                 <div class="form-group">
                     <label>QUEST TIME LIMIT (minutes, optional)</label>
                     <input type="text" id="ms-quest-timelimit" class="pip-input vk-target" readonly onclick="openVk('ms-quest-timelimit')" placeholder="e.g. 120" value="${questData.timeLimit || ''}">
+                </div>
+                <div class="form-group" style="display: flex; align-items: center; gap: 10px; margin-top: 10px;">
+                    <input type="checkbox" id="ms-hide-locked" ${questData.hideLockedStages ? 'checked' : ''} style="width: 20px; height: 20px; cursor: pointer;">
+                    <label for="ms-hide-locked" style="cursor: pointer; margin: 0;">Hide locked stages (show as [REDACTED])</label>
                 </div>
                 <div id="stages-container" style="margin-top: 15px; border-top: 2px dashed var(--pip-color-dim); padding-top: 15px;">
                     <h4>STAGES</h4>
@@ -2182,9 +2187,11 @@
             const titleEl = document.getElementById('ms-quest-title');
             const descEl = document.getElementById('ms-quest-desc');
             const tlEl = document.getElementById('ms-quest-timelimit');
+            const hideLockedEl = document.getElementById('ms-hide-locked');
             if (titleEl) window.pendingMultiStageQuest.title = titleEl.value.trim();
             if (descEl) window.pendingMultiStageQuest.description = descEl.value.trim();
             if (tlEl) window.pendingMultiStageQuest.timeLimit = tlEl.value.trim() ? parseInt(tlEl.value.trim()) : null;
+            if (hideLockedEl) window.pendingMultiStageQuest.hideLockedStages = hideLockedEl.checked;
         }
 
         function addStageOfType(type) {
@@ -2457,6 +2464,7 @@
                     })),
                     status: 'open',
                     timeLimit: timeLimit ? parseInt(timeLimit) : null,
+                    hideLockedStages: window.pendingMultiStageQuest.hideLockedStages || false,
                     createdAt: Date.now()
                 };
                 
@@ -2741,6 +2749,7 @@
                 const userStages = (prog && prog.stages) || {};
                 
                 let currentStageIdx = -1;
+                const hideLocked = q.hideLockedStages === true;
                 stages.forEach((stage, idx) => {
                     const userStage = userStages[stage.id] || {};
                     const stageStatus = userStage.status || (idx === 0 ? 'available' : 'locked');
@@ -2757,10 +2766,16 @@
                         if (currentStageIdx === -1) currentStageIdx = idx;
                     }
                     
-                    text += `\n${statusIcon} Stage ${idx + 1}: ${escapeHtml(stage.title)} [${statusLabel}]`;
-                    if (stage.description) text += `\n   ${escapeHtml(stage.description)}`;
-                    text += `\n   Type: ${stage.type.toUpperCase()}`;
-                    if (stage.reward) text += `\n   Reward: ${escapeHtml(stage.reward)}`;
+                    // v0.170: Redact locked stages if hideLockedStages is enabled
+                    const isRedacted = hideLocked && stageStatus === 'locked';
+                    const stageTitle = isRedacted ? '[REDACTED]' : escapeHtml(stage.title);
+                    
+                    text += `\n${statusIcon} Stage ${idx + 1}: ${stageTitle} [${statusLabel}]`;
+                    if (!isRedacted) {
+                        if (stage.description) text += `\n   ${escapeHtml(stage.description)}`;
+                        text += `\n   Type: ${stage.type.toUpperCase()}`;
+                        if (stage.reward) text += `\n   Reward: ${escapeHtml(stage.reward)}`;
+                    }
                 });
                 
                 // Action buttons
@@ -2788,7 +2803,19 @@
                         });
                     }
                     
-                    buttons.push({ label: 'ABANDON QUEST', color: '#ff3333', action: () => abandonQuest(id) });
+                    buttons.push({ label: 'ABANDON QUEST', color: '#ff3333', action: () => abandonMultiStageQuest(id) });
+                } else if (isCompleted || isVerified) {
+                    // v0.169: Allow viewing evidence for completed/verified quests
+                    const hasEvidence = stages.some((stage, idx) => {
+                        const userStage = userStages[stage.id] || {};
+                        return userStage.evidencePhoto || userStage.evidenceScan;
+                    });
+                    if (hasEvidence) {
+                        buttons.push({ 
+                            label: '📷 VIEW STAGE EVIDENCE', 
+                            action: () => viewMultiStageEvidence(q, prog) 
+                        });
+                    }
                 }
                 
                 buttons.push({ label: 'CLOSE', action: () => {} });
@@ -2798,6 +2825,30 @@
                 console.error('Error in openMultiStageQuestModal:', err);
                 showNotification('ERROR OPENING MULTI-STAGE QUEST: ' + err.message);
             }
+        }
+
+        // v0.169: Abandon multi-stage quest (with confirmation)
+        function abandonMultiStageQuest(id) {
+            showCustomPrompt('ABANDON THIS MULTI-STAGE QUEST?\n\nAll stage progress will be lost. This cannot be undone.', [
+                { label: 'ABANDON QUEST', color: '#ff3333', action: () => {
+                    const myUid = myMailUid;
+                    const progRef = window.firebaseRef(window.db, `quests/${id}/progress/${myUid}`);
+                    window.firebaseUpdate(progRef, {
+                        status: 'abandoned',
+                        abandonedAt: Date.now()
+                    })
+                        .then(() => {
+                            closeCustomPrompt();
+                            showNotification('MULTI-STAGE QUEST ABANDONED');
+                            setTimeout(() => {
+                                switchQuestTab('completed');
+                                renderCompletedQuests();
+                            }, 500);
+                        })
+                        .catch(err => showNotification('ERROR: ' + err.message));
+                }},
+                { label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} }
+            ]);
         }
 
         // v0.160: Accept multi-stage quest and initialize stage progress
@@ -2865,7 +2916,7 @@
             const modal = document.getElementById('photo-pick-modal');
             if (!modal) return;
             
-            document.getElementById('pp-title').innerText = 'SELECT EVIDENCE PHOTO';
+            document.getElementById('pp-title').innerText = `STAGE ${stageIdx + 1} EVIDENCE PHOTO`;
             let html = '<div class="photo-tile-grid">';
             photoArchive.forEach((e, i) => {
                 html += `<div class="photo-tile" onclick="pickMultiStagePhoto(${i})"><img src="${entryPip(e)}"></div>`;
@@ -2960,11 +3011,16 @@
                     playSound('level-up');
                     
                     if (stageIdx + 1 < stages.length) {
-                        showNotification(`STAGE ${stageIdx + 1} COMPLETED! ADVANCING TO STAGE ${stageIdx + 2}`);
+                        const nextStage = stages[stageIdx + 1];
+                        showNotification(`✓ STAGE ${stageIdx + 1} COMPLETED!\n\nNext: ${nextStage.title}`);
                         setTimeout(() => openMultiStageQuestModal(questId), 500);
                     } else {
-                        showNotification('ALL STAGES COMPLETED! QUEST SUBMITTED FOR VERIFICATION');
+                        showNotification('✓ ALL STAGES COMPLETED!\n\nQuest submitted for verification');
                         sendMultiStageVerificationRequest(questId);
+                        setTimeout(() => {
+                            switchQuestTab('active');
+                            renderActiveQuests();
+                        }, 500);
                     }
                 })
                 .catch(err => showNotification('ERROR COMPLETING STAGE: ' + err.message));
