@@ -2448,11 +2448,25 @@
                     buttons.push({ label: 'ACCEPT QUEST', action: () => acceptQuest(id) });
                 } else if (isAccepted && !isCompleted && !isVerified) {
                     // Accepted but not completed - show action buttons
-                    buttons.push({ label: 'ATTACH PHOTO EVIDENCE', action: () => attachPhotoToQuest(id) });
+                    const hasPendingPhoto = window.pendingQuestPhoto && window.pendingQuestPhoto.questId === id && window.pendingQuestPhoto.photo;
+                    
                     if (q.type === 'bounty') {
+                        // Bounty quests: scan datacard OR submit photo evidence
+                        if (hasPendingPhoto) {
+                            buttons.push({ label: '📷 SUBMIT EVIDENCE', color: '#39ff14', action: () => completeQuest(id) });
+                            buttons.push({ label: 'CHANGE PHOTO', action: () => attachPhotoToQuest(id) });
+                        } else {
+                            buttons.push({ label: 'ATTACH PHOTO EVIDENCE', action: () => attachPhotoToQuest(id) });
+                        }
                         buttons.push({ label: 'SCAN TARGET DATACARD', action: () => scanBountyTarget(id) });
                     } else {
-                        buttons.push({ label: 'COMPLETE QUEST', action: () => completeQuest(id) });
+                        // Non-bounty quests: photo evidence required
+                        if (hasPendingPhoto) {
+                            buttons.push({ label: '📷 SUBMIT EVIDENCE', color: '#39ff14', action: () => completeQuest(id) });
+                            buttons.push({ label: 'CHANGE PHOTO', action: () => attachPhotoToQuest(id) });
+                        } else {
+                            buttons.push({ label: 'ATTACH PHOTO EVIDENCE', action: () => attachPhotoToQuest(id) });
+                        }
                     }
                     // v0.116: Allow self-reject/abandon
                     buttons.push({ label: 'ABANDON QUEST', color: '#ff3333', action: () => abandonQuest(id) });
@@ -2542,7 +2556,7 @@
         }
 
         function acceptQuest(id) {
-            const myUid = localStorage.getItem('pipboy-uid');
+            const myUid = myMailUid; // Use myMailUid instead of localStorage
             const myName = userProfile.name || 'UNKNOWN';
             const progRef = window.firebaseRef(window.db, `quests/${id}/progress/${myUid}`);
             window.firebaseSet(progRef, {
@@ -2565,7 +2579,7 @@
         function abandonQuest(id) {
             showCustomPrompt('ABANDON THIS QUEST?\n\nThis will remove it from your active quests.', [
                 { label: 'ABANDON QUEST', color: '#ff3333', action: () => {
-                    const myUid = localStorage.getItem('pipboy-uid');
+                    const myUid = myMailUid; // Use myMailUid instead of localStorage
                     const progRef = window.firebaseRef(window.db, `quests/${id}/progress/${myUid}`);
                     window.firebaseUpdate(progRef, {
                         status: 'abandoned',
@@ -2587,7 +2601,7 @@
 
         function completeQuest(id) {
             try {
-                const myUid = localStorage.getItem('pipboy-uid');
+                const myUid = myMailUid; // Use myMailUid instead of localStorage (set at boot)
                 const myName = userProfile.name || 'UNKNOWN';
                 const q = firebaseQuests[id];
                 if (!q) {
@@ -2863,8 +2877,57 @@
                 showNotification('WRONG TARGET - SCAN THE BOUNTY TARGET\'S DATACARD');
                 return true;
             }
-            completeQuest(questId);
+            // v0.158: Bounty scan completion - the scan IS the proof, no photo required
+            completeBountyByScan(questId);
             return true;
+        }
+
+        // v0.158: Complete bounty quest via datacard scan (scan = proof, no photo needed)
+        function completeBountyByScan(id) {
+            try {
+                const myUid = myMailUid;
+                const myName = userProfile.name || 'UNKNOWN';
+                const q = firebaseQuests[id];
+                if (!q) {
+                    showNotification('ERROR: Quest not found');
+                    return;
+                }
+                
+                const updates = {
+                    status: 'completed',
+                    completedAt: Date.now(),
+                    completedByName: myName,
+                    completedByScan: true
+                };
+                
+                // If a photo was also attached, include it
+                if (window.pendingQuestPhoto && window.pendingQuestPhoto.questId === id && window.pendingQuestPhoto.photo) {
+                    updates.evidencePhoto = window.pendingQuestPhoto.photo;
+                    window.pendingQuestPhoto = null;
+                }
+                
+                const progRef = window.firebaseRef(window.db, `quests/${id}/progress/${myUid}`);
+                window.firebaseUpdate(progRef, updates)
+                    .then(() => {
+                        closeCustomPrompt();
+                        showNotification('☠ BOUNTY CLAIMED - AWAITING VERIFICATION');
+                        playSound('xp');
+                        // Send verify-request mail to issuer
+                        if (q.issuerUid) {
+                            queueMail(q.issuerUid, 'verify-request', {
+                                questId: id,
+                                title: q.title,
+                                completedByName: myName,
+                                evidencePhoto: updates.evidencePhoto || null,
+                                completedByScan: true
+                            }, 'VERIFY: BOUNTY ' + q.title + ' CLAIMED BY ' + myName);
+                        }
+                        switchQuestTab('active');
+                    })
+                    .catch(err => showNotification('ERROR: ' + err.message));
+            } catch (err) {
+                showNotification('ERROR COMPLETING BOUNTY: ' + err.message);
+            }
         }
 
         function startQuestsListener() {
