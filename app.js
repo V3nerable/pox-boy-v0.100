@@ -2018,6 +2018,12 @@
         }
 
         function createQuestForm(type) {
+            // Handle multi-stage quests separately
+            if (type === 'multi-stage') {
+                createMultiStageQuestForm();
+                return;
+            }
+            
             // Show the unified quest creation modal
             document.getElementById('create-quest-modal').style.display = 'flex';
             document.getElementById('cq-modal-title').innerText = 'CREATE ' + type.toUpperCase() + ' QUEST';
@@ -2049,6 +2055,233 @@
                 recipientGroup.style.display = 'none';
                 targetGroup.style.display = 'none';
             }
+        }
+        
+        // v0.153: Multi-stage quest creation
+        function createMultiStageQuestForm() {
+            // Initialize multi-stage quest data
+            window.pendingMultiStageQuest = {
+                title: '',
+                description: '',
+                stages: [],
+                timeLimit: null
+            };
+            
+            // Show multi-stage quest creation modal
+            document.getElementById('create-quest-modal').style.display = 'flex';
+            document.getElementById('cq-modal-title').innerText = 'CREATE MULTI-STAGE QUEST';
+            
+            // Clear form fields
+            document.getElementById('new-quest-title').value = '';
+            document.getElementById('new-quest-desc').value = '';
+            document.getElementById('new-quest-reward').value = '';
+            
+            // Hide recipient/target fields
+            document.getElementById('quest-recipient-group').style.display = 'none';
+            document.getElementById('quest-target-group').style.display = 'none';
+            
+            // Show stage management UI
+            showStageManagementUI();
+        }
+        
+        function showStageManagementUI() {
+            // Show stage management UI
+            const modal = document.getElementById('create-quest-modal');
+            const content = modal.querySelector('.modal-content');
+            
+            // Replace modal content with stage management UI
+            content.innerHTML = `
+                <h3 id="cq-modal-title">CREATE MULTI-STAGE QUEST</h3>
+                <div class="form-group">
+                    <label>QUEST TITLE</label>
+                    <input type="text" id="ms-quest-title" class="pip-input vk-target" readonly onclick="openVk('ms-quest-title')" placeholder="e.g. Scavenger Hunt">
+                </div>
+                <div class="form-group">
+                    <label>DESCRIPTION</label>
+                    <textarea id="ms-quest-desc" class="pip-input vk-target grow" readonly onclick="openVk('ms-quest-desc')" rows="2" placeholder="Quest description..."></textarea>
+                </div>
+                <div class="form-group">
+                    <label>QUEST TIME LIMIT (minutes, optional)</label>
+                    <input type="text" id="ms-quest-timelimit" class="pip-input vk-target" readonly onclick="openVk('ms-quest-timelimit')" placeholder="e.g. 120">
+                </div>
+                <div id="stages-container" style="margin-top: 15px; border-top: 2px dashed var(--pip-color-dim); padding-top: 15px;">
+                    <h4>STAGES</h4>
+                    <div id="stages-list"></div>
+                    <button class="pip-btn" onclick="addStage()" style="margin-top: 10px; border-style: dashed;">+ ADD STAGE</button>
+                </div>
+                <div style="display: flex; gap: 10px; margin-top: 15px;">
+                    <button class="pip-btn" onclick="submitMultiStageQuest()" style="flex: 1;">CREATE QUEST</button>
+                    <button class="pip-btn" onclick="closeModals()" style="flex: 1; border-style: dashed;">CANCEL</button>
+                </div>
+            `;
+            
+            // Render stages
+            renderStagesList();
+        }
+        
+        function renderStagesList() {
+            const stagesList = document.getElementById('stages-list');
+            if (!stagesList) return;
+            
+            const stages = window.pendingMultiStageQuest.stages;
+            
+            if (stages.length === 0) {
+                stagesList.innerHTML = '<p style="opacity: 0.5; text-align: center;">No stages added yet</p>';
+                return;
+            }
+            
+            let html = '';
+            stages.forEach((stage, idx) => {
+                html += `
+                    <div style="border: 1px solid var(--pip-color-dim); padding: 10px; margin-bottom: 10px; background: rgba(0,0,0,0.3);">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                            <strong>STAGE ${idx + 1}: ${stage.type.toUpperCase()}</strong>
+                            <button class="pip-btn" onclick="removeStage(${idx})" style="padding: 2px 8px; font-size: 0.8rem; border-color: #ff3333; color: #ff3333;">✕</button>
+                        </div>
+                        <div style="font-size: 0.9rem;">${stage.title}</div>
+                        <div style="font-size: 0.8rem; opacity: 0.7;">${stage.description}</div>
+                        ${stage.reward ? `<div style="font-size: 0.8rem; color: #5fc98e;">Reward: ${stage.reward}</div>` : ''}
+                        ${stage.timeLimit ? `<div style="font-size: 0.8rem; opacity: 0.7;">Time limit: ${stage.timeLimit} min</div>` : ''}
+                        ${stage.qrCode ? `<div style="font-size: 0.8rem; color: #ffb642;">QR Code: ${stage.qrCode}</div>` : ''}
+                    </div>
+                `;
+            });
+            
+            stagesList.innerHTML = html;
+        }
+        
+        function addStage() {
+            // Show stage type picker
+            showCustomPrompt('SELECT STAGE TYPE', [
+                { label: '📍 LOCATION (go to location)', action: () => addStageOfType('location') },
+                { label: '☠ BOUNTY (hunt target)', action: () => addStageOfType('bounty') },
+                { label: '📷 PHOTO (take photo)', action: () => addStageOfType('photo') },
+                { label: '📱 SCAN CODE (scan QR)', action: () => addStageOfType('scan-code') },
+                { label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} }
+            ]);
+        }
+        
+        function addStageOfType(type) {
+            // Add a new stage
+            const stage = {
+                id: 'stage' + (window.pendingMultiStageQuest.stages.length + 1),
+                type: type,
+                title: '',
+                description: '',
+                reward: '',
+                qrCode: null,
+                timeLimit: null,
+                status: 'available'
+            };
+            
+            window.pendingMultiStageQuest.stages.push(stage);
+            
+            // Show stage editor
+            editStage(window.pendingMultiStageQuest.stages.length - 1);
+        }
+        
+        function editStage(idx) {
+            const stage = window.pendingMultiStageQuest.stages[idx];
+            if (!stage) return;
+            
+            // Show stage editor modal
+            showCustomPrompt('EDIT STAGE ' + (idx + 1), [
+                { label: 'EDIT DETAILS', action: () => editStageDetails(idx) },
+                { label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} }
+            ]);
+        }
+        
+        function editStageDetails(idx) {
+            const stage = window.pendingMultiStageQuest.stages[idx];
+            if (!stage) return;
+            
+            // For now, just prompt for title and description
+            const title = prompt('Stage title:', stage.title || '');
+            if (title === null) return;
+            
+            const description = prompt('Stage description:', stage.description || '');
+            if (description === null) return;
+            
+            const reward = prompt('Reward (optional):', stage.reward || '');
+            const timeLimit = prompt('Time limit in minutes (optional):', stage.timeLimit || '');
+            
+            stage.title = title;
+            stage.description = description;
+            stage.reward = reward || null;
+            stage.timeLimit = timeLimit ? parseInt(timeLimit) : null;
+            
+            // For scan-code stages, prompt for QR code
+            if (stage.type === 'scan-code') {
+                const qrCode = prompt('QR code content (e.g., scav-hunt-1):', stage.qrCode || '');
+                stage.qrCode = qrCode || null;
+            }
+            
+            // Re-render stages list
+            renderStagesList();
+        }
+        
+        function removeStage(idx) {
+            window.pendingMultiStageQuest.stages.splice(idx, 1);
+            renderStagesList();
+        }
+        
+        function submitMultiStageQuest() {
+            const title = document.getElementById('ms-quest-title').value.trim();
+            const description = document.getElementById('ms-quest-desc').value.trim();
+            const timeLimit = document.getElementById('ms-quest-timelimit').value.trim();
+            
+            if (!title) {
+                showNotification('QUEST TITLE REQUIRED');
+                return;
+            }
+            
+            if (window.pendingMultiStageQuest.stages.length === 0) {
+                showNotification('AT LEAST ONE STAGE REQUIRED');
+                return;
+            }
+            
+            // Validate stages
+            for (let i = 0; i < window.pendingMultiStageQuest.stages.length; i++) {
+                const stage = window.pendingMultiStageQuest.stages[i];
+                if (!stage.title) {
+                    showNotification('STAGE ' + (i + 1) + ' TITLE REQUIRED');
+                    return;
+                }
+            }
+            
+            // Create multi-stage quest
+            const myUid = localStorage.getItem('pipboy-uid');
+            const myName = userProfile.name || 'UNKNOWN';
+            
+            const questData = {
+                type: 'multi-stage',
+                title: title,
+                description: description,
+                issuerUid: myUid,
+                issuerName: myName,
+                stages: window.pendingMultiStageQuest.stages.map((stage, idx) => ({
+                    ...stage,
+                    id: 'stage' + (idx + 1),
+                    status: idx === 0 ? 'available' : 'locked',
+                    completedBy: null,
+                    completedAt: null,
+                    verifiedBy: null,
+                    verifiedAt: null
+                })),
+                status: 'open',
+                timeLimit: timeLimit ? parseInt(timeLimit) : null,
+                createdAt: Date.now()
+            };
+            
+            // Save to Firebase
+            const questRef = window.firebaseRef(window.db, 'quests');
+            window.firebasePush(questRef, questData)
+                .then(ref => {
+                    showNotification('MULTI-STAGE QUEST CREATED');
+                    closeModals();
+                    switchQuestTab('issued');
+                })
+                .catch(err => showNotification('ERROR: ' + err.message));
         }
         
         function openQuestRecipientPicker() {
@@ -5818,7 +6051,12 @@
                     tabSwitch: new Audio('tab-switch.wav'),
                     cameraOpen: new Audio('camera-open.wav'),
                     notification: new Audio('notification.wav'),
-                    buttonPress: new Audio('button-press.wav')
+                    buttonPress: new Audio('button-press.wav'),
+                    // v0.155: Fallout sounds
+                    lunchbox: new Audio('lunchbox.mp3'),
+                    levelUp: new Audio('level-up.mp3'),
+                    xp: new Audio('xp.mp3'),
+                    nuke: new Audio('nuke.mp3')
                 };
                 
                 // Preload all sounds
