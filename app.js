@@ -1887,10 +1887,14 @@
                 if (!q.completed && !q.expired && !q.abandoned) return;
                 const statusText = q.completed ? '✓ COMPLETED' : q.expired ? '⏰ EXPIRED' : '✗ ABANDONED';
                 const borderColor = q.completed ? '#39ff14' : q.expired ? '#ffb642' : '#ff3333';
-                html.push(`<div class="item-row" style="border-color:${borderColor}; opacity:0.6;" onclick="openQuestActionModal('${q.id}')">
-                    <div style="font-weight:bold; text-decoration:line-through;">${escapeHtml(q.name)}</div>
-                    <div style="font-size:0.85rem; opacity:0.7;">${escapeHtml(q.giver || 'UNKNOWN')}</div>
-                    <div style="font-size:0.85rem; color:${borderColor};">${statusText}</div>
+                html.push(`<div class="item-row" style="border-color:${borderColor}; opacity:0.6; display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: start;" onclick="openQuestActionModal('${q.id}')">
+                    <div>
+                        <div style="font-weight:bold; text-decoration:line-through;">${escapeHtml(q.name)}</div>
+                        <div style="font-size:0.85rem; opacity:0.7;">${escapeHtml(q.giver || 'UNKNOWN')}</div>
+                    </div>
+                    <div style="text-align: right;">
+                        <div style="font-size:0.85rem; color:${borderColor}; font-weight: bold;">${statusText}</div>
+                    </div>
                 </div>`);
             });
 
@@ -1920,15 +1924,23 @@
                 const borderColor = isVerified ? '#39ff14' : isCompleted ? '#ffb642' : isCancelled || isExpired ? '#ff9a3c' : '#ff3333';
                 const opacity = isVerified ? '0.6' : isRejected || isAbandoned || isCancelled || isExpired ? '0.5' : '0.7';
                 
-                html.push(`<div class="item-row" style="border-color:${borderColor}; opacity:${opacity};" onclick="openQuestModal('${id}')">
-                    <div style="font-weight:bold; text-decoration:line-through;">${escapeHtml(q.title)}</div>
-                    <div style="font-size:0.85rem; opacity:0.7;">${q.type.toUpperCase()} — ${escapeHtml(q.issuerName || 'UNKNOWN')}</div>
-                    <div style="font-size:0.85rem; color:${borderColor};">${statusText}</div>
-                    ${isVerified && prog.verifiedAt ? `<div style="font-size:0.75rem; opacity:0.6;">Verified: ${new Date(prog.verifiedAt).toLocaleString()}</div>` : ''}
-                    ${isRejected && prog.rejectedAt ? `<div style="font-size:0.75rem; opacity:0.6;">Rejected: ${new Date(prog.rejectedAt).toLocaleString()}</div>` : ''}
-                    ${isAbandoned && prog.abandonedAt ? `<div style="font-size:0.75rem; opacity:0.6;">Abandoned: ${new Date(prog.abandonedAt).toLocaleString()}</div>` : ''}
-                    ${prog.evidencePhoto ? `<div style="font-size:0.75rem; color:#ffb642;">📷 Evidence attached</div>` : ''}
-                    ${q.reward ? `<div style="font-size:0.85rem; color:#5fc98e;">REWARD: ${escapeHtml(q.reward)}</div>` : ''}
+                // Build details section
+                let details = '';
+                if (isVerified && prog.verifiedAt) details += `<div style="font-size:0.75rem; opacity:0.6;">Verified: ${new Date(prog.verifiedAt).toLocaleString()}</div>`;
+                if (isRejected && prog.rejectedAt) details += `<div style="font-size:0.75rem; opacity:0.6;">Rejected: ${new Date(prog.rejectedAt).toLocaleString()}</div>`;
+                if (isAbandoned && prog.abandonedAt) details += `<div style="font-size:0.75rem; opacity:0.6;">Abandoned: ${new Date(prog.abandonedAt).toLocaleString()}</div>`;
+                if (prog.evidencePhoto) details += `<div style="font-size:0.75rem; color:#ffb642;">📷 Evidence attached</div>`;
+                if (q.reward) details += `<div style="font-size:0.85rem; color:#5fc98e; margin-top: 5px;">REWARD: ${escapeHtml(q.reward)}</div>`;
+                
+                html.push(`<div class="item-row" style="border-color:${borderColor}; opacity:${opacity}; display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: start;" onclick="openQuestModal('${id}')">
+                    <div>
+                        <div style="font-weight:bold; text-decoration:line-through;">${escapeHtml(q.title)}</div>
+                        <div style="font-size:0.85rem; opacity:0.7;">${q.type.toUpperCase()} — ${escapeHtml(q.issuerName || 'UNKNOWN')}</div>
+                        ${details}
+                    </div>
+                    <div style="text-align: right;">
+                        <div style="font-size:0.85rem; color:${borderColor}; font-weight: bold;">${statusText}</div>
+                    </div>
                 </div>`);
             });
 
@@ -2284,11 +2296,11 @@
             const stage = window.pendingMultiStageQuest.stages[idx];
             if (!stage) return;
             
-            // v0.159: Use in-modal form instead of native prompt()
+            // v0.174: Update stage management section instead of replacing modal content
             window.editingStageIdx = idx;
             
-            const modal = document.getElementById('create-quest-modal');
-            const content = modal.querySelector('.modal-content');
+            const stageSection = document.getElementById('stage-management-section');
+            if (!stageSection) return;
             
             let qrField = '';
             if (stage.type === 'scan-code') {
@@ -2310,7 +2322,7 @@
                     </div>`;
             }
             
-            content.innerHTML = `
+            stageSection.innerHTML = `
                 <h3>EDIT STAGE ${idx + 1} — ${stage.type.toUpperCase()}</h3>
                 <div class="form-group">
                     <label>STAGE TITLE</label>
@@ -6366,11 +6378,43 @@
         let ciSelectedItemId = null;
 
         function saveComms() {
-            localStorage.setItem('pipboy-rolodex', JSON.stringify(rolodex));
-            localStorage.setItem('pipboy-outbox', JSON.stringify(outbox));
-            localStorage.setItem('pipboy-maillog', JSON.stringify(mailLog));
-            localStorage.setItem('pipboy-mail-seen', JSON.stringify(mailSeen.slice(-500)));
-            localStorage.setItem('pipboy-linkscans', JSON.stringify(linkScans)); // v0.45
+            try {
+                localStorage.setItem('pipboy-rolodex', JSON.stringify(rolodex));
+                localStorage.setItem('pipboy-outbox', JSON.stringify(outbox));
+                localStorage.setItem('pipboy-maillog', JSON.stringify(mailLog));
+                localStorage.setItem('pipboy-mail-seen', JSON.stringify(mailSeen.slice(-500)));
+                localStorage.setItem('pipboy-linkscans', JSON.stringify(linkScans)); // v0.45
+            } catch (e) {
+                if (e.name === 'QuotaExceededError' || e.code === 22) {
+                    // v0.174: Storage quota exceeded - cleanup old data
+                    console.warn('Storage quota exceeded, cleaning up old data');
+                    
+                    // Remove old outbox entries (keep only last 50)
+                    if (outbox.length > 50) {
+                        outbox = outbox.slice(-50);
+                    }
+                    
+                    // Remove old mail log entries (keep only last 50)
+                    if (mailLog.length > 50) {
+                        mailLog = mailLog.slice(-50);
+                    }
+                    
+                    // Try again with reduced data
+                    try {
+                        localStorage.setItem('pipboy-rolodex', JSON.stringify(rolodex));
+                        localStorage.setItem('pipboy-outbox', JSON.stringify(outbox));
+                        localStorage.setItem('pipboy-maillog', JSON.stringify(mailLog));
+                        localStorage.setItem('pipboy-mail-seen', JSON.stringify(mailSeen.slice(-200)));
+                        localStorage.setItem('pipboy-linkscans', JSON.stringify(linkScans));
+                        showNotification('STORAGE CLEANUP: Old messages removed');
+                    } catch (e2) {
+                        console.error('Still cannot save after cleanup:', e2);
+                        showNotification('ERROR: Storage full - cannot save data');
+                    }
+                } else {
+                    console.error('Error saving comms:', e);
+                }
+            }
         }
         function saveProcessed() {
             localStorage.setItem('pipboy-mail-processed', JSON.stringify(mailProcessed.slice(-500)));
@@ -7318,7 +7362,16 @@
                         if (mailTabActive()) renderMail();
                     }
                 },
-                { label: 'IGNORE', color: 'var(--pip-color-dim)', action: () => {} }
+                { 
+                    label: 'DISMISS', 
+                    color: '#ff3333', 
+                    action: () => { 
+                        // v0.174: Actually dismiss the untrusted message
+                        markProcessed(key); 
+                        retireLetter(key); 
+                        if (mailTabActive()) renderMail();
+                    } 
+                }
             ]);
         }
 
