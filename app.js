@@ -3093,9 +3093,11 @@
                 { label: 'ABANDON QUEST', color: '#ff3333', action: () => {
                     const myUid = myMailUid; // Use myMailUid instead of localStorage
                     const progRef = window.firebaseRef(window.db, `quests/${id}/progress/${myUid}`);
-                    window.firebaseUpdate(progRef, {
+                    // v0.166: Use firebaseSet to create entry if it doesn't exist (fixes permission denied)
+                    window.firebaseSet(progRef, {
                         status: 'abandoned',
-                        abandonedAt: Date.now()
+                        abandonedAt: Date.now(),
+                        acceptedAt: Date.now() // Required field for validation
                     })
                         .then(() => {
                             closeCustomPrompt();
@@ -7298,13 +7300,41 @@
                 ]);
             } else if (l.type === 'verify-request') {
                 const p = l.payload || {};
-                const buttons = [
-                    { label: 'VIEW EVIDENCE', action: () => { if (p.evidencePhoto) viewEvidencePhoto(p.evidencePhoto); else showNotification('NO EVIDENCE PHOTO'); } },
-                    { label: 'VERIFY COMPLETION', color: '#39ff14', action: () => { verifyQuestFromMail(key, l); } },
-                    { label: 'REJECT', color: '#ff3333', action: () => { rejectQuestFromMail(key, l); } },
-                    { label: 'DECIDE LATER', action: () => {} }
-                ];
-                showCustomPrompt('QUEST COMPLETED BY ' + (p.completedByName || 'UNKNOWN') + ':\n\n"' + (p.title || '') + '"\n\nVERIFY OR REJECT?', buttons);
+                const questId = p.questId;
+                const quest = questId ? firebaseQuests[questId] : null;
+                const isAlreadyProcessed = quest && (quest.status === 'cancelled' || quest.status === 'expired');
+                
+                // Check if completion is already verified/rejected
+                let completionAlreadyProcessed = false;
+                if (quest && quest.progress && p.completedByName) {
+                    const completedByUid = Object.keys(quest.progress).find(uid => {
+                        return quest.progress[uid].completedByName === p.completedByName;
+                    });
+                    if (completedByUid) {
+                        const prog = quest.progress[completedByUid];
+                        completionAlreadyProcessed = prog.status === 'verified' || prog.status === 'rejected';
+                    }
+                }
+                
+                const buttons = [];
+                if (isAlreadyProcessed || completionAlreadyProcessed) {
+                    // Quest or completion already processed - only allow dismiss
+                    buttons.push({ label: 'DISMISS', action: () => { 
+                        markProcessed(key); 
+                        retireLetter(key); 
+                        if (mailTabActive()) renderMail();
+                    }});
+                } else {
+                    buttons.push({ label: 'VIEW EVIDENCE', action: () => { if (p.evidencePhoto) viewEvidencePhoto(p.evidencePhoto); else showNotification('NO EVIDENCE PHOTO'); } });
+                    buttons.push({ label: 'VERIFY COMPLETION', color: '#39ff14', action: () => { verifyQuestFromMail(key, l); } });
+                    buttons.push({ label: 'REJECT', color: '#ff3333', action: () => { rejectQuestFromMail(key, l); } });
+                    buttons.push({ label: 'DISMISS', action: () => { 
+                        markProcessed(key); 
+                        retireLetter(key); 
+                        if (mailTabActive()) renderMail();
+                    }});
+                }
+                showCustomPrompt('QUEST COMPLETED BY ' + (p.completedByName || 'UNKNOWN') + ':\n\n"' + (p.title || '') + '"\n\n' + (isAlreadyProcessed ? 'QUEST IS ' + quest.status.toUpperCase() + ' - DISMISS?' : completionAlreadyProcessed ? 'COMPLETION ALREADY PROCESSED - DISMISS?' : 'VERIFY OR REJECT?'), buttons);
                 if (p.evidencePhoto) {
                     const img = document.getElementById('cp-img');
                     if (img) { img.src = p.evidencePhoto; img.style.display = 'block'; }
