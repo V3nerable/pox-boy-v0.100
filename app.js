@@ -1938,7 +1938,7 @@
                 if (q.type === 'direct') return; // direct firebaseQuests not shown here
                 const alreadyAccepted = q.progress && q.progress[myUid];
                 if (alreadyAccepted) return; // already accepted
-                const typeLabel = q.type === 'global' ? '🌍 GLOBAL' : '☠ BOUNTY';
+                const typeLabel = q.type === 'global' ? '🌍 GLOBAL' : q.type === 'bounty' ? '☠ BOUNTY' : q.type === 'multi-stage' ? '🔗 MULTI-STAGE' : q.type.toUpperCase();
                 const targetLine = q.type === 'bounty' ? `<div style="font-size:0.85rem; color:#ff3333;">TARGET: ${escapeHtml(q.targetName || 'UNKNOWN')}</div>` : '';
                 html.push(`<div class="item-row" onclick="openQuestModal('${id}')">
                     <div style="font-weight:bold;">${escapeHtml(q.title)}</div>
@@ -2013,6 +2013,7 @@
                 { label: '📋 DIRECT (send to specific person)', action: () => createQuestForm('direct') },
                 { label: '🌍 GLOBAL (visible to all)', action: () => createQuestForm('global') },
                 { label: '☠ BOUNTY (hunt a target)', action: () => createQuestForm('bounty') },
+                { label: '🔗 MULTI-STAGE (multiple objectives)', action: () => createQuestForm('multi-stage') },
                 { label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} }
             ]);
         }
@@ -2089,20 +2090,23 @@
             const modal = document.getElementById('create-quest-modal');
             const content = modal.querySelector('.modal-content');
             
+            // v0.159: Preserve existing quest data when returning from stage edit
+            const questData = window.pendingMultiStageQuest || { title: '', description: '', timeLimit: null };
+            
             // Replace modal content with stage management UI
             content.innerHTML = `
                 <h3 id="cq-modal-title">CREATE MULTI-STAGE QUEST</h3>
                 <div class="form-group">
                     <label>QUEST TITLE</label>
-                    <input type="text" id="ms-quest-title" class="pip-input vk-target" readonly onclick="openVk('ms-quest-title')" placeholder="e.g. Scavenger Hunt">
+                    <input type="text" id="ms-quest-title" class="pip-input vk-target" readonly onclick="openVk('ms-quest-title')" placeholder="e.g. Scavenger Hunt" value="${escapeHtml(questData.title || '')}">
                 </div>
                 <div class="form-group">
                     <label>DESCRIPTION</label>
-                    <textarea id="ms-quest-desc" class="pip-input vk-target grow" readonly onclick="openVk('ms-quest-desc')" rows="2" placeholder="Quest description..."></textarea>
+                    <textarea id="ms-quest-desc" class="pip-input vk-target grow" readonly onclick="openVk('ms-quest-desc')" rows="2" placeholder="Quest description...">${escapeHtml(questData.description || '')}</textarea>
                 </div>
                 <div class="form-group">
                     <label>QUEST TIME LIMIT (minutes, optional)</label>
-                    <input type="text" id="ms-quest-timelimit" class="pip-input vk-target" readonly onclick="openVk('ms-quest-timelimit')" placeholder="e.g. 120">
+                    <input type="text" id="ms-quest-timelimit" class="pip-input vk-target" readonly onclick="openVk('ms-quest-timelimit')" placeholder="e.g. 120" value="${questData.timeLimit || ''}">
                 </div>
                 <div id="stages-container" style="margin-top: 15px; border-top: 2px dashed var(--pip-color-dim); padding-top: 15px;">
                     <h4>STAGES</h4>
@@ -2161,7 +2165,20 @@
             ]);
         }
         
+        // v0.159: Save quest-level fields from DOM to pendingMultiStageQuest before DOM replacement
+        function saveQuestLevelFields() {
+            const titleEl = document.getElementById('ms-quest-title');
+            const descEl = document.getElementById('ms-quest-desc');
+            const tlEl = document.getElementById('ms-quest-timelimit');
+            if (titleEl) window.pendingMultiStageQuest.title = titleEl.value.trim();
+            if (descEl) window.pendingMultiStageQuest.description = descEl.value.trim();
+            if (tlEl) window.pendingMultiStageQuest.timeLimit = tlEl.value.trim() ? parseInt(tlEl.value.trim()) : null;
+        }
+
         function addStageOfType(type) {
+            // v0.159: Save quest-level fields before DOM replacement
+            saveQuestLevelFields();
+            
             // Add a new stage
             const stage = {
                 id: 'stage' + (window.pendingMultiStageQuest.stages.length + 1),
@@ -2195,29 +2212,72 @@
             const stage = window.pendingMultiStageQuest.stages[idx];
             if (!stage) return;
             
-            // For now, just prompt for title and description
-            const title = prompt('Stage title:', stage.title || '');
-            if (title === null) return;
+            // v0.159: Use in-modal form instead of native prompt()
+            window.editingStageIdx = idx;
             
-            const description = prompt('Stage description:', stage.description || '');
-            if (description === null) return;
+            const modal = document.getElementById('create-quest-modal');
+            const content = modal.querySelector('.modal-content');
             
-            const reward = prompt('Reward (optional):', stage.reward || '');
-            const timeLimit = prompt('Time limit in minutes (optional):', stage.timeLimit || '');
-            
-            stage.title = title;
-            stage.description = description;
-            stage.reward = reward || null;
-            stage.timeLimit = timeLimit ? parseInt(timeLimit) : null;
-            
-            // For scan-code stages, prompt for QR code
+            let qrField = '';
             if (stage.type === 'scan-code') {
-                const qrCode = prompt('QR code content (e.g., scav-hunt-1):', stage.qrCode || '');
-                stage.qrCode = qrCode || null;
+                qrField = `
+                    <div class="form-group">
+                        <label>QR CODE CONTENT</label>
+                        <input type="text" id="edit-stage-qr" class="pip-input vk-target" readonly onclick="openVk('edit-stage-qr')" placeholder="e.g. scav-hunt-1" value="${escapeHtml(stage.qrCode || '')}">
+                    </div>`;
             }
             
-            // Re-render stages list
-            renderStagesList();
+            content.innerHTML = `
+                <h3>EDIT STAGE ${idx + 1} — ${stage.type.toUpperCase()}</h3>
+                <div class="form-group">
+                    <label>STAGE TITLE</label>
+                    <input type="text" id="edit-stage-title" class="pip-input vk-target" readonly onclick="openVk('edit-stage-title')" placeholder="e.g. Find the hidden cache" value="${escapeHtml(stage.title || '')}">
+                </div>
+                <div class="form-group">
+                    <label>DESCRIPTION</label>
+                    <textarea id="edit-stage-desc" class="pip-input vk-target grow" readonly onclick="openVk('edit-stage-desc')" rows="2" placeholder="Stage description...">${escapeHtml(stage.description || '')}</textarea>
+                </div>
+                <div class="form-group">
+                    <label>REWARD (optional)</label>
+                    <input type="text" id="edit-stage-reward" class="pip-input vk-target" readonly onclick="openVk('edit-stage-reward')" placeholder="e.g. 50 XP" value="${escapeHtml(stage.reward || '')}">
+                </div>
+                <div class="form-group">
+                    <label>TIME LIMIT IN MINUTES (optional)</label>
+                    <input type="text" id="edit-stage-timelimit" class="pip-input vk-target" readonly onclick="openVk('edit-stage-timelimit')" placeholder="e.g. 30" value="${stage.timeLimit || ''}">
+                </div>
+                ${qrField}
+                <div style="display: flex; gap: 10px; margin-top: 15px;">
+                    <button class="pip-btn" onclick="saveStageEdit(${idx})" style="flex: 1;">SAVE STAGE</button>
+                    <button class="pip-btn" onclick="cancelStageEdit()" style="flex: 1; border-style: dashed;">CANCEL</button>
+                </div>
+            `;
+        }
+        
+        function saveStageEdit(idx) {
+            const stage = window.pendingMultiStageQuest.stages[idx];
+            if (!stage) return;
+            
+            const title = document.getElementById('edit-stage-title').value.trim();
+            if (!title) { showNotification('STAGE TITLE REQUIRED'); return; }
+            
+            stage.title = title;
+            stage.description = document.getElementById('edit-stage-desc').value.trim();
+            stage.reward = document.getElementById('edit-stage-reward').value.trim() || null;
+            const tl = document.getElementById('edit-stage-timelimit').value.trim();
+            stage.timeLimit = tl ? parseInt(tl) : null;
+            
+            if (stage.type === 'scan-code') {
+                const qrEl = document.getElementById('edit-stage-qr');
+                if (qrEl) stage.qrCode = qrEl.value.trim() || null;
+            }
+            
+            window.editingStageIdx = null;
+            showStageManagementUI();
+        }
+        
+        function cancelStageEdit() {
+            window.editingStageIdx = null;
+            showStageManagementUI();
         }
         
         function removeStage(idx) {
@@ -2250,7 +2310,7 @@
             }
             
             // Create multi-stage quest
-            const myUid = localStorage.getItem('pipboy-uid');
+            const myUid = myMailUid;
             const myName = userProfile.name || 'UNKNOWN';
             
             const questData = {
@@ -2476,13 +2536,23 @@
                 }
                 buttons.push({ label: 'CLOSE', action: () => {} });
                 
-                const typeLabel = q.type === 'global' ? '🌍 GLOBAL' : q.type === 'bounty' ? '☠ BOUNTY' : '📋 DIRECT';
+                const typeLabel = q.type === 'global' ? '🌍 GLOBAL' : q.type === 'bounty' ? '☠ BOUNTY' : q.type === 'multi-stage' ? '🔗 MULTI-STAGE' : '📋 DIRECT';
                 const statusText = isVerified ? '✓ VERIFIED' : isCompleted ? '⏳ AWAITING VERIFICATION' : isAccepted ? 'ACTIVE' : 'NOT ACCEPTED';
                 const targetLine = q.type === 'bounty' ? `\nTARGET: ${escapeHtml(q.targetName || 'UNKNOWN')}` : '';
                 const desc = q.description ? `\n\n${escapeHtml(q.description)}` : '';
                 const rewardLine = q.reward ? `\n\nREWARD: ${escapeHtml(q.reward)}` : '';
                 
-                const promptText = `${typeLabel}\n${escapeHtml(q.title)}${desc}${targetLine}${rewardLine}\n\nSTATUS: ${statusText}\nISSUED BY: ${escapeHtml(q.issuerName || 'UNKNOWN')}`;
+                // v0.159: Multi-stage quests show stages list
+                let stagesLine = '';
+                if (q.type === 'multi-stage' && q.stages) {
+                    stagesLine = '\n\n━━━ STAGES ━━━';
+                    q.stages.forEach((stage, idx) => {
+                        const stageStatus = stage.status === 'available' ? '○' : stage.status === 'completed' ? '✓' : stage.status === 'locked' ? '🔒' : '○';
+                        stagesLine += `\n${stageStatus} ${idx + 1}. ${escapeHtml(stage.title)} (${stage.type.toUpperCase()})`;
+                    });
+                }
+                
+                const promptText = `${typeLabel}\n${escapeHtml(q.title)}${desc}${targetLine}${rewardLine}${stagesLine}\n\nSTATUS: ${statusText}\nISSUED BY: ${escapeHtml(q.issuerName || 'UNKNOWN')}`;
                 
                 console.log('Opening prompt with text:', promptText);
                 console.log('Buttons:', buttons);
