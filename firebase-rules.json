@@ -11,8 +11,13 @@
         "timestamp": { ".validate": "newData.isNumber() && newData.val() > 1735689600000" },
         "hp":        { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1000" },
         "rads":      { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1000" },
+        "radsLifetime": { ".validate": "newData.isNumber() && newData.val() >= 0" },
         "mutations": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 20" },
         "glowingOne": { ".validate": "newData.isBoolean()" },
+        "inMedZone": { ".validate": "newData.isBoolean()" },
+        "inRadZone": { ".validate": "newData.isBoolean()" },
+        "photosTaken": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+        "avatar":    { ".validate": "newData.isString() && newData.val().length <= 100000" },
         "$other":    { ".validate": false }
       }
     },

@@ -4510,9 +4510,10 @@
             });
 
             // Using CartoDB Dark Matter (Free, no API key needed) and styling it with CSS filters
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                attribution: '&copy; OpenStreetMap contributors',
-                maxZoom: 19
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+                subdomains: 'abcd',
+                maxZoom: 20
             }).addTo(pipMap);
             
             // Listen for long-press / right-click
@@ -4637,8 +4638,35 @@
                         } else liveN++;
                         drawnN++;
 
+                        // v0.179: Use avatar as marker icon if available
+                        let markerIcon;
+                        if (p.avatar && ageInMinutes <= 5) {
+                            // Live player with avatar - show circular avatar
+                            markerIcon = L.divIcon({
+                                className: 'custom-pip-marker',
+                                html: `<div style="width: 32px; height: 32px; border-radius: 50%; border: 2px solid #ffb642; box-shadow: 0 0 10px #ffb642; overflow: hidden; background: #000;">
+                                    <img src="${p.avatar}" style="width: 100%; height: 100%; object-fit: cover;">
+                                </div>`,
+                                iconSize: [32, 32],
+                                iconAnchor: [16, 16]
+                            });
+                        } else if (p.avatar && ageInMinutes > 5) {
+                            // Cold player with avatar - show faded circular avatar
+                            markerIcon = L.divIcon({
+                                className: 'custom-pip-marker',
+                                html: `<div style="width: 32px; height: 32px; border-radius: 50%; border: 2px dashed var(--pip-color-dim); opacity: 0.6; overflow: hidden; background: #000;">
+                                    <img src="${p.avatar}" style="width: 100%; height: 100%; object-fit: cover; opacity: 0.6;">
+                                </div>`,
+                                iconSize: [32, 32],
+                                iconAnchor: [16, 16]
+                            });
+                        } else {
+                            // No avatar - use default dot
+                            markerIcon = ageInMinutes > 5 ? otherPlayerIconCold : otherPlayerIcon;
+                        }
+
                         try {
-                            const pMarker = L.marker([plat, plng], {icon: ageInMinutes > 5 ? otherPlayerIconCold : otherPlayerIcon, zIndexOffset: 900})
+                            const pMarker = L.marker([plat, plng], {icon: markerIcon, zIndexOffset: 900})
                                 .bindTooltip(nameLabel, {
                                     permanent: false,
                                     direction: 'top',
@@ -5192,7 +5220,9 @@
                 hp: Math.max(0, userProfile.maxHp - Math.floor((myRads / 1000) * userProfile.maxHp)),
                 rads: myRads,
                 mutations: activeMutations.length, // v0.58: broadcast mutation count for beacon indicator
-                glowingOne: isGlowingOne // v0.67: broadcast Glowing One status
+                glowingOne: isGlowingOne, // v0.67: broadcast Glowing One status
+                inMedZone: medShelterActive, // v0.178: broadcast med zone status
+                inRadZone: radFieldActive // v0.178: broadcast rad zone status
             };
             
             // v0.177: Add lifetime stats for leaderboard
@@ -9887,7 +9917,8 @@
                     photosTaken: w.photosTaken || 0, // v0.177: Use photos from beacon
                     avatar: w.avatar || null, // v0.177: Add avatar
                     glowingOne: w.glowingOne || false, // v0.177: Add glowing one status
-                    inMedZone: w.inMedZone || false // v0.177: Add med zone status
+                    inMedZone: w.inMedZone || false, // v0.177: Add med zone status
+                    inRadZone: w.inRadZone || false // v0.178: Add rad zone status
                 };
             });
             
@@ -9937,10 +9968,13 @@
                     players = players.filter(p => p.hp > 0 && (now - p.lastSeen) < 300000); // 5 min
                     break;
                 case 'glowing':
-                    players = players.filter(p => p.rads >= 1000);
+                    players = players.filter(p => p.rads >= 1000 || p.glowingOne);
                     break;
                 case 'highrads':
                     players = players.filter(p => p.rads >= 500);
+                    break;
+                case 'lifetime-rads':
+                    players = players.filter(p => p.radsLifetime >= 1000);
                     break;
                 case 'mutated':
                     players = players.filter(p => p.mutations > 0);
@@ -9969,6 +10003,9 @@
                     break;
                 case 'rads':
                     players.sort((a, b) => b.rads - a.rads);
+                    break;
+                case 'lifetime-rads':
+                    players.sort((a, b) => b.radsLifetime - a.radsLifetime);
                     break;
                 case 'mutations':
                     players.sort((a, b) => b.mutations - a.mutations);
@@ -10042,9 +10079,41 @@
                     // Get avatar from player data or wastelanders
                     const w = wastelanders[p.uid];
                     const avatarSrc = p.avatar || (w && w.avatar);
+                    
+                    // v0.178: Add rad/med zone symbols overlay
+                    let avatarOverlay = '';
+                    if (p.glowingOne || p.rads >= 1000) {
+                        // Glowing One - green rad symbols
+                        avatarOverlay = `<div style="position: absolute; top: 0; left: 0; width: 70px; height: 70px; pointer-events: none;">
+                            <span class='vb-tre' style='left:6px;top:6px;color:#39ff14;text-shadow:0 0 10px #39ff14;'>☢</span>
+                            <span class='vb-tre' style='right:6px;bottom:8px;color:#39ff14;text-shadow:0 0 10px #39ff14;animation-delay:.8s;'>☢</span>
+                            <span class='vb-tre' style='right:10px;top:10px;color:#39ff14;text-shadow:0 0 10px #39ff14;animation-delay:1.4s;font-size:16px;'>☢</span>
+                        </div>`;
+                    } else if (p.inRadZone) {
+                        // In rad zone - orange rad symbols
+                        avatarOverlay = `<div style="position: absolute; top: 0; left: 0; width: 70px; height: 70px; pointer-events: none;">
+                            <span class='vb-tre' style='left:6px;top:6px;color:#ff9a3c;'>☢</span>
+                            <span class='vb-tre' style='right:6px;bottom:8px;color:#ff9a3c;animation-delay:.8s;'>☢</span>
+                            <span class='vb-tre' style='right:10px;top:10px;color:#ff9a3c;animation-delay:1.4s;font-size:16px;'>☢</span>
+                        </div>`;
+                    } else if (p.inMedZone) {
+                        // In med zone - green cross symbols
+                        avatarOverlay = `<div style="position: absolute; top: 0; left: 0; width: 70px; height: 70px; pointer-events: none;">
+                            <span class='vb-cross' style='left:6px;top:6px;color:#5fc98e;'>✚</span>
+                            <span class='vb-cross' style='right:8px;bottom:10px;color:#5fc98e;animation-delay:.7s;'>✚</span>
+                            <span class='vb-cross' style='right:12px;top:12px;color:#5fc98e;animation-delay:1.5s;font-size:16px;'>✚</span>
+                        </div>`;
+                    }
+                    
                     const avatar = avatarSrc ? 
-                        `<img src="${avatarSrc}" style="width: 70px; height: 70px; border-radius: 50%; border: 3px solid ${borderColor}; margin: 0 auto 10px auto; display: block; box-shadow: 0 0 10px ${borderColor}; object-fit: cover;">` : 
-                        `<div style="width: 70px; height: 70px; border-radius: 50%; border: 3px solid ${borderColor}; margin: 0 auto 10px auto; display: flex; align-items: center; justify-content: center; opacity: 0.3; font-size: 2rem; background: rgba(0,0,0,0.3);">?</div>`;
+                        `<div style="position: relative; width: 70px; height: 70px; margin: 0 auto 10px auto;">
+                            <img src="${avatarSrc}" style="width: 70px; height: 70px; border-radius: 50%; border: 3px solid ${borderColor}; display: block; box-shadow: 0 0 10px ${borderColor}; object-fit: cover;">
+                            ${avatarOverlay}
+                        </div>` : 
+                        `<div style="position: relative; width: 70px; height: 70px; margin: 0 auto 10px auto;">
+                            <div style="width: 70px; height: 70px; border-radius: 50%; border: 3px solid ${borderColor}; display: flex; align-items: center; justify-content: center; opacity: 0.3; font-size: 2rem; background: rgba(0,0,0,0.3);">?</div>
+                            ${avatarOverlay}
+                        </div>`;
                     
                     html += `
                         <div style="border: 2px solid ${borderColor}; padding: 15px; background: rgba(0,0,0,0.4); ${glowEffect}">
