@@ -176,20 +176,20 @@
 
         const themes = [
             { name: "GREEN", hex: "#1aff80", dim: "#0f8f48", rgb: "26, 255, 128",
-              mapFx: "sepia(100%) hue-rotate(70deg) saturate(600%) brightness(1.1) contrast(1.2)",
+              mapFx: "sepia(100%) hue-rotate(70deg) saturate(600%) brightness(0.7) contrast(1.2)",
               camFx: "sepia(100%) hue-rotate(85deg) saturate(300%) brightness(0.8) contrast(1.8)" },
             { name: "AMBER", hex: "#ffb642", dim: "#b37200", rgb: "255, 182, 66",
-              mapFx: "sepia(100%) hue-rotate(-10deg) saturate(500%) brightness(1.05) contrast(1.2)",
+              mapFx: "sepia(100%) hue-rotate(-10deg) saturate(500%) brightness(0.7) contrast(1.2)",
               camFx: "sepia(100%) hue-rotate(-5deg) saturate(250%) brightness(0.8) contrast(1.7)" },
             { name: "BLUE", hex: "#42b6ff", dim: "#006bb3", rgb: "66, 182, 255",
-              mapFx: "sepia(100%) hue-rotate(160deg) saturate(500%) brightness(1.05) contrast(1.2)",
+              mapFx: "sepia(100%) hue-rotate(160deg) saturate(500%) brightness(0.7) contrast(1.2)",
               camFx: "sepia(100%) hue-rotate(170deg) saturate(280%) brightness(0.8) contrast(1.8)" },
             { name: "WHITE", hex: "#ffffff", dim: "#888888", rgb: "255, 255, 255",
-              mapFx: "grayscale(100%) brightness(1.05) contrast(1.3)",
+              mapFx: "grayscale(100%) brightness(0.7) contrast(1.3)",
               camFx: "grayscale(90%) brightness(0.85) contrast(1.7)" },
             // v0.69: PDA theme (dev-only, S.T.A.L.K.E.R. style)
             { name: "PDA", hex: "#d4a574", dim: "#8b7355", rgb: "212, 165, 116",
-              mapFx: "sepia(80%) hue-rotate(-20deg) saturate(150%) brightness(0.9) contrast(1.1)",
+              mapFx: "sepia(80%) hue-rotate(-20deg) saturate(150%) brightness(0.6) contrast(1.1)",
               camFx: "sepia(80%) hue-rotate(-20deg) saturate(150%) brightness(0.85) contrast(1.2)",
               pda: true }
         ];
@@ -4483,6 +4483,10 @@
         let lastKnownRadZones = {};
         let zoneMarkerRefs = {};           // v0.51: zoneKey -> diamond marker, for select-to-reveal labels
         let selectedZoneKey = null;        // v0.51: tapped zone pins the map card + shows its label
+        // v0.182: Satellite map mode
+        let satelliteMode = false;
+        let satelliteTileLayer = null;
+        let darkTileLayer = null;
         let userMarker = null;
         let gpsWatchId = null;
         let liveTrackingEnabled = false;
@@ -4509,11 +4513,19 @@
                 try { localStorage.setItem('pipboy-mapview', JSON.stringify({ c: [pipMap.getCenter().lat, pipMap.getCenter().lng], z: pipMap.getZoom() })); } catch (e) {}
             });
 
-            // Using CartoDB Dark Matter (Free, no API key needed) and styling it with CSS filters
-            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+            // v0.182: Create both tile layers (dark and satellite)
+            darkTileLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
                 attribution: 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ',
                 maxZoom: 16
-            }).addTo(pipMap);
+            });
+            
+            satelliteTileLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community',
+                maxZoom: 19
+            });
+            
+            // Add dark tiles by default
+            darkTileLayer.addTo(pipMap);
             
             // Listen for long-press / right-click
             pipMap.on('contextmenu', function(e) {
@@ -4889,6 +4901,36 @@
             if (!pipMap || typeof lat !== 'number' || typeof lng !== 'number') return;
             pipMap.setView([lat, lng], Math.max(pipMap.getZoom(), 16));
             selectBeacon(uid);
+        }
+
+        // v0.182: Toggle satellite map mode
+        function toggleSatelliteMode() {
+            if (!pipMap) return;
+            
+            satelliteMode = !satelliteMode;
+            
+            if (satelliteMode) {
+                // Switch to satellite tiles
+                pipMap.removeLayer(darkTileLayer);
+                satelliteTileLayer.addTo(pipMap);
+                // Apply green overlay filter for satellite
+                document.documentElement.style.setProperty('--tile-filter', 'sepia(100%) hue-rotate(70deg) saturate(400%) brightness(0.6) contrast(1.1) opacity(0.9)');
+                showNotification('SATELLITE VIEW ENABLED');
+            } else {
+                // Switch back to dark tiles
+                pipMap.removeLayer(satelliteTileLayer);
+                darkTileLayer.addTo(pipMap);
+                // Restore theme filter
+                const t = themes[currentThemeIndex];
+                document.documentElement.style.setProperty('--tile-filter', t.mapFx);
+                showNotification('DARK MAP ENABLED');
+            }
+            
+            // Update button text
+            const btn = document.getElementById('satellite-toggle-btn');
+            if (btn) {
+                btn.innerText = satelliteMode ? '[🗺️ DARK MAP]' : '[🛰️ SATELLITE]';
+            }
         }
 
         function renderMarkers() {
