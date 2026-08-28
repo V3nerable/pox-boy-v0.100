@@ -1148,10 +1148,6 @@
             if (tabId === 'cam') {
                 renderPhotoGallery();
             }
-            if (tabId === 'chronicle') {
-                // v0.185: Render chronicle (overseer only)
-                renderChronicle();
-            }
             if (tabId !== 'cam') {
                 // Turn off the camera if they navigate away to save battery
                 stopCamera();
@@ -1193,6 +1189,12 @@
                 if (subTabId === 'quests') renderQuests();
                 if (subTabId === 'contracts') renderContracts();
                 if (subTabId === 'wastelanders') { renderWastelanders(); renderLinkRequests(); }
+            } else if (parentTab === 'mail') {
+                // v0.186: MAIL sub-tabs are now MAIL / CHRONICLE (chronicle is overseer-only)
+                document.getElementById(`tab-${parentTab}`).querySelectorAll('.sub-tab-content').forEach(el => el.classList.remove('active'));
+                const mailTarget = document.getElementById(`sub-${parentTab}-${subTabId}`);
+                if (mailTarget) mailTarget.classList.add('active');
+                if (subTabId === 'chronicle') renderChronicle();
             } else {
                 document.getElementById(`tab-${parentTab}`).querySelectorAll('.sub-tab-content').forEach(el => el.classList.remove('active'));
                 document.getElementById(`sub-${parentTab}-${subTabId}`).classList.add('active');
@@ -3788,9 +3790,9 @@
                 showNotification("OVERSEER MODE ENABLED. ADMIN UI UNLOCKED.");
                 closeModals();
                 
-                // v0.185: Show chronicle tab for overseer
-                const chronicleNav = document.getElementById('chronicle-navitem');
-                if (chronicleNav) chronicleNav.style.display = 'block';
+                // v0.186: Show chronicle sub-tab for overseer
+                const chronicleSubNav = document.getElementById('chronicle-sub-nav-item');
+                if (chronicleSubNav) chronicleSubNav.style.display = 'block';
 
                 // We need to re-evaluate the current tab to reveal the buttons immediately
                 const activeMainTab = document.querySelector('.nav-tabs .nav-item.active').innerText.toLowerCase();
@@ -5681,7 +5683,7 @@
             // Manually hide elements that should disappear immediately (null-guarded: some
             // of these ids only exist on certain layouts — never let one 404 kill the rest)
             ['add-item-btn', 'add-quest-btn', 'faction-controls', 'dev-add-marker-btn',
-             'dev-remove-marker-btn', 'dev-add-one-btn', 'dev-remove-one-btn', 'chronicle-navitem'].forEach(id => {
+             'dev-remove-marker-btn', 'dev-add-one-btn', 'dev-remove-one-btn', 'chronicle-sub-nav-item'].forEach(id => {
                 const el = document.getElementById(id);
                 if (el) el.style.display = 'none';
             });
@@ -9741,10 +9743,10 @@
         maybeAutoGps(); // v0.52: GPS is on-until-turned-off -- silently re-arm if it was left on
         updateHud();    // v0.56: header glyphs paint at boot
         
-        // v0.185: Show chronicle tab if dev mode is enabled
+        // v0.186: Show chronicle sub-tab if dev mode is enabled
         if (localStorage.getItem('pipboy-dev-mode') === 'true') {
-            const chronicleNav = document.getElementById('chronicle-navitem');
-            if (chronicleNav) chronicleNav.style.display = 'block';
+            const chronicleSubNav = document.getElementById('chronicle-sub-nav-item');
+            if (chronicleSubNav) chronicleSubNav.style.display = 'block';
         }
 
         // ==================== PWA INSTALL PIPELINE (v0.32) ====================
@@ -10288,9 +10290,6 @@
                 chronicleEntries = Object.keys(data).map(key => ({ id: key, ...data[key] }))
                     .sort((a, b) => b.timestamp - a.timestamp); // Newest first
                 
-                // Archive system: keep last 200 entries for current day, archive older days
-                archiveChronicleEntries();
-                
                 // Update display if on chronicle tab
                 if (document.getElementById('tab-chronicle')?.classList.contains('active')) {
                     renderChronicle();
@@ -10431,22 +10430,6 @@
             
             const entryRef = window.firebaseRef(window.db, 'chronicle/entries');
             window.firebasePush(entryRef, entry);
-        }
-        
-        function archiveChronicleEntries() {
-            // Keep last 200 entries for current day
-            // Archive older entries by day
-            const maxEntries = 200;
-            
-            if (chronicleEntries.length > maxEntries) {
-                const toDelete = chronicleEntries.slice(maxEntries);
-                toDelete.forEach(entry => {
-                    if (window.db) {
-                        const entryRef = window.firebaseRef(window.db, `chronicle/entries/${entry.id}`);
-                        window.firebaseRemove(entryRef);
-                    }
-                });
-            }
         }
         
         function renderChronicle() {
