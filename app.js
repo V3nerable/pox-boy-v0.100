@@ -3575,11 +3575,15 @@
                     return;
                 }
                 
+                // v0.175: Bounty scan = auto-verify (scan is sufficient proof)
                 const updates = {
-                    status: 'completed',
+                    status: 'verified',
                     completedAt: Date.now(),
                     completedByName: myName,
-                    completedByScan: true
+                    completedByScan: true,
+                    verifiedAt: Date.now(),
+                    verifiedBy: myUid,
+                    verifiedByName: myName
                 };
                 
                 // If a photo was also attached, include it
@@ -3592,18 +3596,9 @@
                 window.firebaseUpdate(progRef, updates)
                     .then(() => {
                         closeCustomPrompt();
-                        showNotification('☠ BOUNTY CLAIMED - AWAITING VERIFICATION');
+                        showNotification('☠ BOUNTY CLAIMED & VERIFIED');
                         playSound('xp');
-                        // Send verify-request mail to issuer
-                        if (q.issuerUid) {
-                            queueMail(q.issuerUid, 'verify-request', {
-                                questId: id,
-                                title: q.title,
-                                completedByName: myName,
-                                evidencePhoto: updates.evidencePhoto || null,
-                                completedByScan: true
-                            }, 'VERIFY: BOUNTY ' + q.title + ' CLAIMED BY ' + myName);
-                        }
+                        // v0.175: No verify-request needed - scan is proof
                         switchQuestTab('active');
                     })
                     .catch(err => showNotification('ERROR: ' + err.message));
