@@ -233,6 +233,36 @@
         "$other":      { ".validate": false }
       }
     },
+    "chronicle": {
+      ".read": true,
+      "entries": {
+        "$entryId": {
+          ".write": true,
+          ".validate": "newData.hasChildren(['timestamp', 'eventType', 'narrative'])",
+          "timestamp":     { ".validate": "newData.isNumber() && newData.val() > 1735689600000" },
+          "eventType":     { ".validate": "newData.isString() && newData.val().length <= 32" },
+          "narrative":     { ".validate": "newData.isString() && newData.val().length <= 1000" },
+          "affectedUsers": { ".validate": "newData.isString()" },
+          "relatedPhotos": { ".validate": "newData.isString()" },
+          "locationData":  { ".validate": "newData.isString()" },
+          "day":           { ".validate": "newData.isNumber()" },
+          "$other":        { ".validate": false }
+        }
+      },
+      "rawEvents": {
+        "$eventId": {
+          ".write": true,
+          ".validate": "newData.hasChildren(['timestamp', 'eventType', 'userId'])",
+          "timestamp":  { ".validate": "newData.isNumber() && newData.val() > 1735689600000" },
+          "eventType":  { ".validate": "newData.isString() && newData.val().length <= 32" },
+          "userId":     { ".validate": "newData.isString() && newData.val().length <= 64" },
+          "userName":   { ".validate": "newData.isString() && newData.val().length <= 32" },
+          "data":       { ".validate": "newData.isString()" },
+          "$other":     { ".validate": false }
+        }
+      },
+      "$other": { ".validate": false }
+    },
     "$other": { ".read": false, ".write": false }
   }
 }

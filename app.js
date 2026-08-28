@@ -911,6 +911,13 @@
 
             saveToStorage(); 
             
+            // v0.185: Log user joined chronicle event
+            logChronicleEvent('userJoined', myMailUid, userProfile.name, {
+                origin: originData?.name || 'UNKNOWN',
+                trait: traitData?.name || 'UNKNOWN',
+                perk: perkData?.name || 'UNKNOWN'
+            });
+            
             document.getElementById('onboarding-overlay').style.display = 'none';
             renderProfile();
         }
@@ -1140,6 +1147,10 @@
             }
             if (tabId === 'cam') {
                 renderPhotoGallery();
+            }
+            if (tabId === 'chronicle') {
+                // v0.185: Render chronicle (overseer only)
+                renderChronicle();
             }
             if (tabId !== 'cam') {
                 // Turn off the camera if they navigate away to save battery
@@ -3776,6 +3787,10 @@
                 localStorage.setItem('pipboy-dev-mode', 'true');
                 showNotification("OVERSEER MODE ENABLED. ADMIN UI UNLOCKED.");
                 closeModals();
+                
+                // v0.185: Show chronicle tab for overseer
+                const chronicleNav = document.getElementById('chronicle-navitem');
+                if (chronicleNav) chronicleNav.style.display = 'block';
 
                 // We need to re-evaluate the current tab to reveal the buttons immediately
                 const activeMainTab = document.querySelector('.nav-tabs .nav-item.active').innerText.toLowerCase();
@@ -5666,7 +5681,7 @@
             // Manually hide elements that should disappear immediately (null-guarded: some
             // of these ids only exist on certain layouts — never let one 404 kill the rest)
             ['add-item-btn', 'add-quest-btn', 'faction-controls', 'dev-add-marker-btn',
-             'dev-remove-marker-btn', 'dev-add-one-btn', 'dev-remove-one-btn'].forEach(id => {
+             'dev-remove-marker-btn', 'dev-add-one-btn', 'dev-remove-one-btn', 'chronicle-navitem'].forEach(id => {
                 const el = document.getElementById(id);
                 if (el) el.style.display = 'none';
             });
@@ -9725,6 +9740,12 @@
         initRadio();      // v0.53: load the three-dial manifest + download badges
         maybeAutoGps(); // v0.52: GPS is on-until-turned-off -- silently re-arm if it was left on
         updateHud();    // v0.56: header glyphs paint at boot
+        
+        // v0.185: Show chronicle tab if dev mode is enabled
+        if (localStorage.getItem('pipboy-dev-mode') === 'true') {
+            const chronicleNav = document.getElementById('chronicle-navitem');
+            if (chronicleNav) chronicleNav.style.display = 'block';
+        }
 
         // ==================== PWA INSTALL PIPELINE (v0.32) ====================
         // Root cause of "install did nothing on Chrome": the WebAPK minting pipeline is
@@ -9850,12 +9871,16 @@
                 initPipMap();
             }
             
-            // Move the main map into the overseer display
+            // Move the main map and overlays into the overseer display
             const mapContainer = document.getElementById('map-container');
+            const mapSignals = document.getElementById('map-signals');
+            const mapCamOverlay = document.getElementById('map-cam-overlay');
             const overseerMapContainer = document.getElementById('overseer-map-container');
             if (mapContainer && overseerMapContainer && pipMap) {
                 overseerMapContainer.innerHTML = ''; // Clear loading message
                 overseerMapContainer.appendChild(mapContainer);
+                overseerMapContainer.appendChild(mapSignals);
+                overseerMapContainer.appendChild(mapCamOverlay);
                 mapContainer.style.width = '100%';
                 mapContainer.style.height = '100%';
                 
@@ -9897,11 +9922,15 @@
             const centerDot = document.getElementById('overseer-center-dot');
             if (centerDot) centerDot.style.display = 'none';
             
-            // Move the map back to its original location
+            // Move the map and overlays back to their original location
             const mapContainer = document.getElementById('map-container');
-            const tabMap = document.getElementById('tab-map');
-            if (mapContainer && tabMap) {
-                tabMap.insertBefore(mapContainer, tabMap.firstChild);
+            const mapSignals = document.getElementById('map-signals');
+            const mapCamOverlay = document.getElementById('map-cam-overlay');
+            const splitMain = document.querySelector('#tab-map .split-main');
+            if (mapContainer && splitMain) {
+                splitMain.insertBefore(mapContainer, splitMain.firstChild);
+                splitMain.appendChild(mapSignals);
+                splitMain.appendChild(mapCamOverlay);
                 mapContainer.style.width = '';
                 mapContainer.style.height = '';
                 
@@ -10219,6 +10248,270 @@
                 
                 container.innerHTML = html;
             });
+        }
+
+        // ==================== LIVING WASTELAND CHRONICLE (v0.185) ====================
+        // Omniscient narrator weaving all players' experiences into one gritty epic
+        // Only viewable by overseer, ignores test/dev accounts
+        
+        let chronicleEntries = [];
+        let rawEvents = [];
+        let chronicleListenerActive = false;
+        const TEST_ACCOUNT_KEYWORDS = ['TEST', 'DEV', 'ADMIN', 'DEMO', 'OVERSEER'];
+        
+        function isTestAccount(userName) {
+            if (!userName) return true;
+            const upperName = userName.toUpperCase();
+            return TEST_ACCOUNT_KEYWORDS.some(keyword => upperName.includes(keyword));
+        }
+        
+        function startChronicleListener() {
+            if (!window.db || chronicleListenerActive) return;
+            
+            // Listen to raw events
+            const eventsRef = window.firebaseRef(window.db, 'chronicle/rawEvents');
+            window.firebaseOnValue(eventsRef, (snapshot) => {
+                const data = snapshot.val() || {};
+                rawEvents = Object.keys(data).map(key => ({ id: key, ...data[key] }))
+                    .sort((a, b) => a.timestamp - b.timestamp);
+                
+                // Process events in batches every 30 seconds
+                if (!window.chronicleBatchTimer) {
+                    window.chronicleBatchTimer = setInterval(processChronicleBatch, 30000);
+                }
+            });
+            
+            // Listen to chronicle entries
+            const entriesRef = window.firebaseRef(window.db, 'chronicle/entries');
+            window.firebaseOnValue(entriesRef, (snapshot) => {
+                const data = snapshot.val() || {};
+                chronicleEntries = Object.keys(data).map(key => ({ id: key, ...data[key] }))
+                    .sort((a, b) => b.timestamp - a.timestamp); // Newest first
+                
+                // Archive system: keep last 200 entries for current day, archive older days
+                archiveChronicleEntries();
+                
+                // Update display if on chronicle tab
+                if (document.getElementById('tab-chronicle')?.classList.contains('active')) {
+                    renderChronicle();
+                }
+            });
+            
+            chronicleListenerActive = true;
+        }
+        
+        function processChronicleBatch() {
+            const now = Date.now();
+            const thirtySecondsAgo = now - 30000;
+            
+            // Get events from last 30 seconds
+            const recentEvents = rawEvents.filter(e => e.timestamp >= thirtySecondsAgo);
+            
+            if (recentEvents.length === 0) return;
+            
+            // Group related events
+            const grouped = groupRelatedEvents(recentEvents);
+            
+            // Generate narrative for each group
+            grouped.forEach(eventGroup => {
+                const narrative = generateNarrative(eventGroup);
+                if (narrative) {
+                    saveChronicleEntry(narrative);
+                }
+            });
+        }
+        
+        function groupRelatedEvents(events) {
+            // Group events by type and time proximity
+            const groups = [];
+            const processed = new Set();
+            
+            events.forEach(event => {
+                if (processed.has(event.id)) return;
+                
+                // Find related events within 5 seconds
+                const related = events.filter(e => 
+                    !processed.has(e.id) &&
+                    Math.abs(e.timestamp - event.timestamp) < 5000 &&
+                    (e.eventType === event.eventType || 
+                     (e.eventType === 'bountyClaim' && event.eventType === 'death') ||
+                     (e.eventType === 'death' && event.eventType === 'bountyClaim'))
+                );
+                
+                related.forEach(e => processed.add(e.id));
+                groups.push(related);
+            });
+            
+            return groups;
+        }
+        
+        function generateNarrative(eventGroup) {
+            const mainEvent = eventGroup[0];
+            const eventType = mainEvent.eventType;
+            
+            // Filter out test accounts
+            const realUsers = eventGroup.filter(e => !isTestAccount(e.userName));
+            if (realUsers.length === 0) return null;
+            
+            const templates = getNarrativeTemplates(eventType);
+            if (!templates || templates.length === 0) return null;
+            
+            const template = templates[Math.floor(Math.random() * templates.length)];
+            const narrative = fillNarrativeTemplate(template, realUsers, eventGroup);
+            
+            return {
+                timestamp: mainEvent.timestamp,
+                eventType: eventType,
+                narrative: narrative,
+                affectedUsers: realUsers.map(u => u.userName).join(', '),
+                relatedPhotos: realUsers.map(u => u.data?.photo || '').filter(Boolean).join(','),
+                locationData: realUsers.map(u => u.data?.location || '').filter(Boolean).join(','),
+                day: Math.floor((mainEvent.timestamp - window.eventStartTime) / 86400000) + 1
+            };
+        }
+        
+        function getNarrativeTemplates(eventType) {
+            const templates = {
+                userJoined: [
+                    "{users} emerged from the vault, blinking in the harsh wasteland sun. The G.O.A.T. had sorted them, but the wastes cared little for such labels.",
+                    "The vault doors groaned open, spewing {users} into the irradiated hellscape. Fresh meat for the grinder.",
+                    "{users} took their first breath of wasteland air. It tasted like rust and regret. Home sweet home."
+                ],
+                questComplete: [
+                    "{users} completed their quest. The wasteland barely noticed, but hey, small victories.",
+                    "Against all odds, {users} fulfilled their mission. The wastes: 1, {users}: 1. We'll call it a draw.",
+                    "{users} checked another box on their to-do list. The list was written in blood, but whatever works."
+                ],
+                bountyClaim: [
+                    "{users} claimed a bounty today. The victim? Some poor bastard who thought 'hide and seek' was a viable strategy. Spoiler: it wasn't.",
+                    "The hunt ended when {users} found their target. Another name crossed off the list. The wasteland does not judge. It merely consumes.",
+                    "{users} collected their bounty. The target's last words? Probably something like 'wait, this isn't fair!' The wasteland laughed."
+                ],
+                death: [
+                    "{users} died today. The wasteland: 1, {users}: 0. Final score.",
+                    "The Geiger counter screamed one final time as {users} joined the great wasteland in the sky. Or maybe just the ground. Hard to tell.",
+                    "{users} discovered that bullets/radiation/claws hurt. A valuable lesson, learned too late."
+                ],
+                glowingOne: [
+                    "At {rads} rads, {users} transcended mortality. No longer human. No longer mortal. Just... glow. Fashion statement or death sentence? Only time will tell.",
+                    "The radiation finally claimed {users}. Their skin now shimmers with an otherworldly light. They've become one with the glow. Whether that's a good thing remains to be seen.",
+                    "{users} hit 1000 rads today. The transformation was immediate. The screams? Not so much. They were too busy glowing."
+                ],
+                mutation: [
+                    "{users} gained a mutation today: {mutation}. Trade-offs, they say. The wasteland giveth, and the wasteland taketh away.",
+                    "The radiation gifted {users} with {mutation}. Useful? Debatable. Interesting? Absolutely. The wasteland has a twisted sense of humor.",
+                    "{users} woke up with {mutation}. They didn't ask for it. They didn't want it. But the wasteland doesn't care about consent."
+                ],
+                zoneDiscovery: [
+                    "{users} stumbled upon {zone}. The Geiger counter clicked approvingly. Or maybe it was just dying. Hard to tell.",
+                    "The wasteland revealed {zone} to {users}. A gift? A curse? A really bad real estate opportunity? Time will tell.",
+                    "{users} discovered {zone}. The good news? It's on the map. The bad news? Everything else."
+                ]
+            };
+            
+            return templates[eventType] || [];
+        }
+        
+        function fillNarrativeTemplate(template, users, eventGroup) {
+            const userNames = users.map(u => u.userName).join(', ');
+            const mainEvent = eventGroup[0];
+            const rads = mainEvent.data?.rads || 0;
+            const mutation = mainEvent.data?.mutation || 'something weird';
+            const zone = mainEvent.data?.zone || 'a mysterious location';
+            
+            return template
+                .replace(/{users}/g, userNames)
+                .replace(/{rads}/g, rads)
+                .replace(/{mutation}/g, mutation)
+                .replace(/{zone}/g, zone);
+        }
+        
+        function saveChronicleEntry(entry) {
+            if (!window.db) return;
+            
+            const entryRef = window.firebaseRef(window.db, 'chronicle/entries');
+            window.firebasePush(entryRef, entry);
+        }
+        
+        function archiveChronicleEntries() {
+            // Keep last 200 entries for current day
+            // Archive older entries by day
+            const maxEntries = 200;
+            
+            if (chronicleEntries.length > maxEntries) {
+                const toDelete = chronicleEntries.slice(maxEntries);
+                toDelete.forEach(entry => {
+                    if (window.db) {
+                        const entryRef = window.firebaseRef(window.db, `chronicle/entries/${entry.id}`);
+                        window.firebaseRemove(entryRef);
+                    }
+                });
+            }
+        }
+        
+        function renderChronicle() {
+            const container = document.getElementById('chronicle-feed');
+            if (!container) return;
+            
+            if (chronicleEntries.length === 0) {
+                container.innerHTML = '<p style="opacity: 0.5; text-align: center;">The wasteland is quiet... for now.</p>';
+                return;
+            }
+            
+            let html = '<div class="chronicle-entries">';
+            
+            chronicleEntries.forEach(entry => {
+                const time = new Date(entry.timestamp).toLocaleTimeString('en-US', { 
+                    hour: '2-digit', 
+                    minute: '2-digit' 
+                });
+                
+                const day = entry.day || 1;
+                
+                // Parse related photos
+                const photos = entry.relatedPhotos ? entry.relatedPhotos.split(',').filter(Boolean) : [];
+                let photoHtml = '';
+                if (photos.length > 0) {
+                    photoHtml = '<div class="chronicle-photos">';
+                    photos.forEach(photo => {
+                        photoHtml += `<img src="${photo}" style="max-width: 200px; max-height: 150px; margin: 5px; border: 2px solid var(--pip-color); border-radius: 4px;">`;
+                    });
+                    photoHtml += '</div>';
+                }
+                
+                html += `
+                    <div class="chronicle-entry" data-event-type="${entry.eventType}">
+                        <div class="chronicle-header">
+                            <span class="chronicle-time">[${time}]</span>
+                            <span class="chronicle-day">Day ${day}</span>
+                        </div>
+                        <div class="chronicle-narrative">${entry.narrative}</div>
+                        ${photoHtml}
+                    </div>
+                `;
+            });
+            
+            html += '</div>';
+            container.innerHTML = html;
+        }
+        
+        // Event logging functions
+        function logChronicleEvent(eventType, userId, userName, data = {}) {
+            if (!window.db || isTestAccount(userName)) return;
+            
+            const eventRef = window.firebaseRef(window.db, 'chronicle/rawEvents');
+            window.firebasePush(eventRef, {
+                timestamp: Date.now(),
+                eventType: eventType,
+                userId: userId,
+                userName: userName,
+                data: JSON.stringify(data)
+            });
+        }
+        
+        // Initialize chronicle system
+        if (localStorage.getItem('pipboy-dev-mode') === 'true') {
+            startChronicleListener();
         }
 
         // v0.130: Overseer map control functions
