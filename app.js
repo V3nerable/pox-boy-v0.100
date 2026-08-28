@@ -4510,10 +4510,9 @@
             });
 
             // Using CartoDB Dark Matter (Free, no API key needed) and styling it with CSS filters
-            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-                attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
-                subdomains: 'abcd',
-                maxZoom: 20
+            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+                attribution: 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ',
+                maxZoom: 16
             }).addTo(pipMap);
             
             // Listen for long-press / right-click
@@ -6523,6 +6522,19 @@
         // --- MY DATACARD: broadcast identity QR (plain-text, not JSON) ---
         function openDatacard() {
             document.getElementById('datacard-name').innerText = userProfile.name || 'UNKNOWN';
+            
+            // v0.180: Show avatar on datacard if available
+            const avatarData = localStorage.getItem('pipboy-avatarimg');
+            const avatarContainer = document.getElementById('datacard-avatar');
+            if (avatarContainer) {
+                if (avatarData) {
+                    avatarContainer.innerHTML = `<img src="${avatarData}" style="width: 80px; height: 80px; border-radius: 50%; border: 3px solid var(--pip-color); box-shadow: 0 0 10px var(--pip-color); object-fit: cover;">`;
+                    avatarContainer.style.display = 'block';
+                } else {
+                    avatarContainer.style.display = 'none';
+                }
+            }
+            
             // v0.52: your own card shows your LIVE vitals bar (no beacon staleness here)
             const dv = document.getElementById('dc-vitals');
             if (dv) {
