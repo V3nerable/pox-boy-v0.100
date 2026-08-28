@@ -173,6 +173,7 @@
             "status":          { ".validate": "newData.isString() && (newData.val() == 'accepted' || newData.val() == 'completed' || newData.val() == 'verified' || newData.val() == 'rejected' || newData.val() == 'abandoned')" },
             "completedAt":     { ".validate": "newData.isNumber() || newData.val() == null" },
             "completedByName": { ".validate": "newData.isString() && newData.val().length <= 32" },
+            "completedByScan": { ".validate": "newData.isBoolean() || newData.val() == null" },
             "evidencePhoto":   { ".validate": "newData.isString()" },
             "verifiedBy":      { ".validate": "newData.isString() && newData.val().length <= 64" },
             "verifiedByName":  { ".validate": "newData.isString() && newData.val().length <= 32" },
