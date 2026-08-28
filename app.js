@@ -212,6 +212,7 @@
             geiger: 0,           // geiger burst count
             questsCompleted: 0,  // quests marked complete
             questsAbandoned: 0,  // quests abandoned
+            questsFailed: 0,     // quests expired or rejected
             steals: 0,           // steal-type quests completed
             fetches: 0,          // fetch-type quests completed
             assists: 0,          // assist-type quests completed
@@ -266,6 +267,7 @@
             if (el('fs-distance')) el('fs-distance').innerText = (funStats.distance / 1000).toFixed(1) + ' KM';
             if (el('fs-quests-completed')) el('fs-quests-completed').innerText = funStats.questsCompleted;
             if (el('fs-quests-abandoned')) el('fs-quests-abandoned').innerText = funStats.questsAbandoned;
+            if (el('fs-quests-failed')) el('fs-quests-failed').innerText = funStats.questsFailed;
             if (el('fs-steals')) el('fs-steals').innerText = funStats.steals;
             if (el('fs-fetches')) el('fs-fetches').innerText = funStats.fetches;
             if (el('fs-assists')) el('fs-assists').innerText = funStats.assists;
@@ -1577,6 +1579,7 @@
                     if (now.getTime() >= q.expireTime) {
                         q.expired = true;
                         changed = true;
+                        bumpFunStat('questsFailed', 1); // v0.176: Track failed quests
                         showNotification("QUEST EXPIRED: " + q.name);
                     }
                 }
@@ -2575,8 +2578,9 @@
             // Show all known wastelanders (rolodex + beacon data)
             const buttons = [];
             
-            // Add rolodex contacts
+            // Add rolodex contacts (excluding self)
             rolodex.forEach(c => {
+                if (c.uid === myMailUid) return; // v0.176: Cannot target yourself
                 buttons.push({
                     label: c.name + ' (contact)',
                     action: () => {
@@ -2624,6 +2628,11 @@
                 const targetName = document.getElementById('new-quest-target-display').value;
                 if (!targetUid) {
                     showNotification('TARGET REQUIRED');
+                    return;
+                }
+                // v0.176: Cannot create bounty on yourself
+                if (targetUid === myMailUid) {
+                    showNotification('CANNOT CREATE BOUNTY ON YOURSELF');
                     return;
                 }
                 window.selectedBountyTarget = {
@@ -4501,8 +4510,8 @@
             });
 
             // Using CartoDB Dark Matter (Free, no API key needed) and styling it with CSS filters
-            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-                attribution: '&copy; OpenStreetMap &copy; CARTO',
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; OpenStreetMap contributors',
                 maxZoom: 19
             }).addTo(pipMap);
             
@@ -5175,7 +5184,7 @@
                 blng = d.lng;
             }
             const myRads = userProfile.rads || 0;
-            window.firebaseSet(window.firebaseRef(window.db, 'wastelanders/' + myUid), {
+            const beaconData = {
                 name: (userProfile.name || 'UNKNOWN').slice(0, 24), // rules cap name at 24 chars
                 lat: blat,
                 lng: blng,
@@ -5184,7 +5193,21 @@
                 rads: myRads,
                 mutations: activeMutations.length, // v0.58: broadcast mutation count for beacon indicator
                 glowingOne: isGlowingOne // v0.67: broadcast Glowing One status
-            });
+            };
+            
+            // v0.177: Add lifetime stats for leaderboard
+            if (typeof funStats !== 'undefined') {
+                beaconData.radsLifetime = funStats.radsTotal || 0;
+                beaconData.photosTaken = (typeof photoArchive !== 'undefined' ? photoArchive.length : 0);
+            }
+            
+            // v0.177: Add avatar if available
+            const avatarData = localStorage.getItem('pipboy-avatarimg');
+            if (avatarData) {
+                beaconData.avatar = avatarData;
+            }
+            
+            window.firebaseSet(window.firebaseRef(window.db, 'wastelanders/' + myUid), beaconData);
             lastBeaconAt = Date.now();
         }
 
@@ -5260,6 +5283,45 @@
             if (b) b.innerText = scramblerOn() ? '[BEACON SCRAMBLER: ON]' : '[BEACON SCRAMBLER: OFF]';
         }
         (function() { syncScramblerBtn(); })();
+        
+        // v0.176: Generate QR code for app URL to share
+        function showAppQRCode() {
+            const appUrl = 'https://pox-boy.netlify.app';
+            const qrModal = document.createElement('div');
+            qrModal.id = 'app-qr-modal';
+            qrModal.className = 'modal-overlay';
+            qrModal.style.cssText = 'z-index: 10000; display: flex;';
+            qrModal.innerHTML = `
+                <div class="modal-content" style="max-width: 400px; text-align: center;">
+                    <h3 style="margin-bottom: 15px; color: var(--pip-color);">SHARE POX-BOY APP</h3>
+                    <p style="font-size: 0.9rem; opacity: 0.8; margin-bottom: 15px;">Scan this QR code to install the app</p>
+                    <div id="app-qr-canvas" style="display: inline-block; background: white; padding: 15px; border-radius: 8px;"></div>
+                    <p style="font-size: 0.85rem; margin-top: 15px; opacity: 0.7; word-break: break-all;">${appUrl}</p>
+                    <button class="pip-btn" onclick="closeAppQRModal()" style="margin-top: 15px;">CLOSE</button>
+                </div>
+            `;
+            document.body.appendChild(qrModal);
+            
+            // Generate QR code
+            setTimeout(() => {
+                const canvas = document.getElementById('app-qr-canvas');
+                if (canvas && typeof QRCode !== 'undefined') {
+                    new QRCode(canvas, {
+                        text: appUrl,
+                        width: 256,
+                        height: 256,
+                        colorDark: '#000000',
+                        colorLight: '#ffffff',
+                        correctLevel: QRCode.CorrectLevel.M
+                    });
+                }
+            }, 100);
+        }
+        
+        function closeAppQRModal() {
+            const modal = document.getElementById('app-qr-modal');
+            if (modal) modal.remove();
+        }
         // Long-press map > [SET DECOY SITE HERE] (tempWp* are locked by the waypoint modal)
         function setDecoySite() {
             if (typeof tempWpLat !== 'number' || typeof tempWpLng !== 'number') return;
@@ -9816,12 +9878,16 @@
                     name: w.name || 'UNKNOWN',
                     hp: w.hp || 0,
                     rads: w.rads || 0,
-                    mutations: w.mutations ? w.mutations.length : 0,
+                    radsLifetime: w.radsLifetime || 0, // v0.177: Use lifetime rads
+                    mutations: w.mutations || 0, // v0.177: Handle undefined
                     lastSeen: w.lastSeen || 0,
                     questsCompleted: 0,
                     bountiesClaimed: 0,
                     bountiesSurvived: 0,
-                    photosTaken: 0
+                    photosTaken: w.photosTaken || 0, // v0.177: Use photos from beacon
+                    avatar: w.avatar || null, // v0.177: Add avatar
+                    glowingOne: w.glowingOne || false, // v0.177: Add glowing one status
+                    inMedZone: w.inMedZone || false // v0.177: Add med zone status
                 };
             });
             
@@ -9834,9 +9900,7 @@
                             if (prog.status === 'verified') {
                                 stats[uid].questsCompleted++;
                             }
-                            if (prog.evidencePhoto) {
-                                stats[uid].photosTaken++;
-                            }
+                            // v0.177: Don't count evidence photos here, use beacon data
                         }
                     });
                 }
@@ -9939,13 +10003,15 @@
                     const displayName = escapeHtml(p.name);
                     
                     // Status and border color based on rads
-                    const isGlowing = p.rads >= 1000;
+                    const isGlowing = p.rads >= 1000 || p.glowingOne;
                     const isHighRads = p.rads >= 500 && p.rads < 1000;
+                    const isHighMutations = p.mutations >= 5;
                     const isDead = p.hp === 0;
                     
                     let borderColor = 'var(--pip-color)';
                     let statusColor = '#5fc98e';
                     let statusText = 'ACTIVE';
+                    let glowEffect = '';
                     
                     if (isDead) {
                         borderColor = '#666666';
@@ -9955,18 +10021,33 @@
                         borderColor = '#ff3333';
                         statusColor = '#ff3333';
                         statusText = '☢ GLOWING ONE';
+                        glowEffect = 'box-shadow: 0 0 20px #ff3333, 0 0 40px #ff333380, inset 0 0 20px rgba(255, 51, 51, 0.2);';
+                    } else if (isHighMutations) {
+                        borderColor = '#ff9a3c';
+                        statusColor = '#ff9a3c';
+                        statusText = '☢ HIGHLY MUTATED';
+                        glowEffect = 'box-shadow: 0 0 15px #ff9a3c, 0 0 30px #ff9a3c80;';
                     } else if (isHighRads) {
                         borderColor = '#ffb642';
                         statusColor = '#ffb642';
                         statusText = '⚠ HIGH RADS';
+                        glowEffect = 'box-shadow: 0 0 15px #ffb642, 0 0 30px #ffb64280;';
+                    } else if (p.inMedZone) {
+                        borderColor = '#5fc98e';
+                        statusColor = '#5fc98e';
+                        statusText = '✚ HEALING';
+                        glowEffect = 'box-shadow: 0 0 15px #5fc98e, 0 0 30px #5fc98e80;';
                     }
                     
-                    // Get avatar if available
+                    // Get avatar from player data or wastelanders
                     const w = wastelanders[p.uid];
-                    const avatar = w && w.avatar ? `<img src="${w.avatar}" style="width: 70px; height: 70px; border-radius: 50%; border: 3px solid ${borderColor}; margin: 0 auto 10px auto; display: block; box-shadow: 0 0 10px ${borderColor};">` : '<div style="width: 70px; height: 70px; border-radius: 50%; border: 3px solid ${borderColor}; margin: 0 auto 10px auto; display: flex; align-items: center; justify-content: center; opacity: 0.3; font-size: 2rem;">?</div>';
+                    const avatarSrc = p.avatar || (w && w.avatar);
+                    const avatar = avatarSrc ? 
+                        `<img src="${avatarSrc}" style="width: 70px; height: 70px; border-radius: 50%; border: 3px solid ${borderColor}; margin: 0 auto 10px auto; display: block; box-shadow: 0 0 10px ${borderColor}; object-fit: cover;">` : 
+                        `<div style="width: 70px; height: 70px; border-radius: 50%; border: 3px solid ${borderColor}; margin: 0 auto 10px auto; display: flex; align-items: center; justify-content: center; opacity: 0.3; font-size: 2rem; background: rgba(0,0,0,0.3);">?</div>`;
                     
                     html += `
-                        <div style="border: 2px solid ${borderColor}; padding: 15px; background: rgba(0,0,0,0.4); box-shadow: 0 0 15px ${borderColor}40;">
+                        <div style="border: 2px solid ${borderColor}; padding: 15px; background: rgba(0,0,0,0.4); ${glowEffect}">
                             ${avatar}
                             <div style="font-weight: bold; font-size: 1.1rem; margin-bottom: 6px; text-align: center;">${medal} ${displayName}</div>
                             <div style="color: ${statusColor}; font-size: 0.95rem; margin-bottom: 12px; text-align: center; font-weight: bold;">${statusText}</div>
@@ -9996,12 +10077,16 @@
                                     <span style="font-weight: bold; color: ${p.hp > 50 ? '#5fc98e' : p.hp > 20 ? '#ffb642' : '#ff3333'};">${p.hp} HP</span>
                                 </div>
                                 <div style="display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 0.9rem;">
-                                    <span style="opacity: 0.8;">Radiation:</span>
-                                    <span style="font-weight: bold; color: #ff3333;">${p.rads} rads</span>
+                                    <span style="opacity: 0.8;">Current Rads:</span>
+                                    <span style="font-weight: bold; color: #ff3333;">${p.rads}</span>
+                                </div>
+                                <div style="display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 0.9rem;">
+                                    <span style="opacity: 0.8;">Lifetime Rads:</span>
+                                    <span style="font-weight: bold; color: #ffb642;">${p.radsLifetime}</span>
                                 </div>
                                 <div style="display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 0.9rem;">
                                     <span style="opacity: 0.8;">Mutations:</span>
-                                    <span style="font-weight: bold; color: #ffb642;">${p.mutations}</span>
+                                    <span style="font-weight: bold; color: ${p.mutations > 0 ? '#ff9a3c' : 'inherit'};">${p.mutations}</span>
                                 </div>
                             </div>
                         </div>
