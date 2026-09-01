@@ -4530,10 +4530,10 @@
                 try { localStorage.setItem('pipboy-mapview', JSON.stringify({ c: [pipMap.getCenter().lat, pipMap.getCenter().lng], z: pipMap.getZoom() })); } catch (e) {}
             });
 
-            // v0.182: Create both tile layers (dark and satellite)
-            darkTileLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
-                attribution: 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ',
-                maxZoom: 16
+            // v0.188: Create both tile layers (dark and satellite)
+            darkTileLayer = L.tileLayer('https://stamen-tiles.a.ssl.fastly.net/toner-lite/{z}/{x}/{y}.png', {
+                attribution: 'Map tiles by <a href="http://stamen.com">Stamen Design</a>, under <a href="http://creativecommons.org/licenses/by/3.0">CC BY 3.0</a>. Data by <a href="http://openstreetmap.org">OpenStreetMap</a>, under <a href="http://www.openstreetmap.org/copyright">ODbL</a>.',
+                maxZoom: 18
             });
             
             satelliteTileLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
