@@ -4500,6 +4500,8 @@
         let lastKnownRadZones = {};
         let zoneMarkerRefs = {};           // v0.51: zoneKey -> diamond marker, for select-to-reveal labels
         let selectedZoneKey = null;        // v0.51: tapped zone pins the map card + shows its label
+        // v0.191: Track which large zones have played nuke sound
+        let largeZonesNuked = {};
         // v0.182: Satellite map mode
         let satelliteMode = false;
         let satelliteTileLayer = null;
@@ -4780,8 +4782,16 @@
                 const color = kind === 'med' ? '#5fc98e' : (kind === 'decon' ? '#42d4f5' : '#ff3333');
                 const glyph = kind === 'med' ? '✚' : (kind === 'decon' ? '✦' : '☢');
                 const defaultLabel = kind === 'med' ? 'MED ZONE' : (kind === 'decon' ? 'DECON STATION' : 'HOT ZONE');
+                const radius = typeof z.radius === 'number' ? z.radius : 15;
+                
+                // v0.191: Play nuke sound for large rad zones (>= 175m) when they first appear
+                if (kind === 'hot' && radius >= 175 && !largeZonesNuked[zk]) {
+                    largeZonesNuked[zk] = true;
+                    playSound('nuke');
+                }
+                
                 L.circle([z.lat, z.lng], {
-                    radius: (typeof z.radius === 'number' ? z.radius : 15),
+                    radius: radius,
                     color: color, weight: 1.5, dashArray: '6 4',
                     fillColor: color, fillOpacity: 0.07
                 }).addTo(radZonesGroup);
@@ -7062,7 +7072,9 @@
                     lunchbox: new Audio('lunchbox.mp3'),
                     levelUp: new Audio('level-up.mp3'),
                     xp: new Audio('xp.mp3'),
-                    nuke: new Audio('nuke.mp3')
+                    nuke: new Audio('nuke.mp3'),
+                    // v0.191: SOS Morse code for Overseer broadcasts
+                    sos: new Audio('sos.mp3')
                 };
                 
                 // Preload all sounds
@@ -9352,6 +9364,8 @@
                 if (wireFirstSnap) { wireFirstSnap = false; return; } // boot sync isn't news
                 if (isFreshArrival) {
                     showNotification('OVERSEER WIRE: ' + String(w.text || '').toUpperCase());
+                    // v0.191: Play SOS Morse code for Overseer broadcasts
+                    playSound('sos');
                     if (wireAlertsOn()) { try { pushNativeNotification('OVERSEER WIRE -- ' + String(w.text || '')); } catch (e) {} }
                 }
             }, () => {});
