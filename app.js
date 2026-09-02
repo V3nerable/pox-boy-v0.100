@@ -7321,7 +7321,7 @@
                     // v0.191: SOS Morse code for Overseer broadcasts
                     sos: new Audio('sos.mp3'),
                     // v0.194: Johnny Guitar for quest failures
-                    johnnyGuitar: new Audio('johnny-guitar.mp3')
+                    johnnyGuitar: new Audio('johnny-guitar.opus')
                 };
                 
                 // Preload all sounds
