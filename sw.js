@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pipboy-cache-v190';
+const CACHE_NAME = 'pipboy-cache-v191';
 // v0.53: radio packs live in their own bucket -- app updates must NEVER wipe them
 const RADIO_CACHE = 'pox-radio-v1';
 

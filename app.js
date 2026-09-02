@@ -1599,9 +1599,13 @@
                         q.expired = true;
                         changed = true;
                         bumpFunStat('questsFailed', 1); // v0.176: Track failed quests
-                        showNotification("QUEST EXPIRED: " + q.name);
-                        // v0.194: Play Johnny Guitar sound for quest timeout
-                        playSound('johnnyGuitar');
+                        // v0.201: Show quest status modal with sound
+                        if (typeof showQuestStatusModal === 'function') {
+                            showQuestStatusModal('expired', q.name || 'UNKNOWN');
+                        } else {
+                            showNotification("QUEST EXPIRED: " + q.name);
+                            playSound('johnnyGuitar');
+                        }
                     }
                 }
             });
@@ -3269,9 +3273,14 @@
                     })
                         .then(() => {
                             closeCustomPrompt();
-                            showNotification('QUEST ABANDONED');
-                            // v0.194: Play Johnny Guitar sound for quest failure
-                            playSound('johnnyGuitar');
+                            // v0.201: Show quest status modal with sound
+                            const q = firebaseQuests[id];
+                            if (typeof showQuestStatusModal === 'function') {
+                                showQuestStatusModal('abandoned', q?.title || 'UNKNOWN');
+                            } else {
+                                showNotification('QUEST ABANDONED');
+                                playSound('johnnyGuitar');
+                            }
                             // v0.165: Switch to completed tab immediately (abandoned quests go there)
                             setTimeout(() => {
                                 switchQuestTab('completed');
@@ -3324,7 +3333,12 @@
                 window.firebaseUpdate(progRef, updates)
                     .then(() => {
                         closeCustomPrompt();
-                        showNotification('QUEST COMPLETED - AWAITING VERIFICATION');
+                        // v0.201: Show quest status modal with sound
+                        if (typeof showQuestStatusModal === 'function') {
+                            showQuestStatusModal('completed', q.title || 'UNKNOWN');
+                        } else {
+                            showNotification('QUEST COMPLETED - AWAITING VERIFICATION');
+                        }
                         // v0.191: Log quest completed to chronicle
                         logChronicleEvent('questComplete', myUid, myName, {
                             questTitle: q.title || 'UNKNOWN',
@@ -3380,7 +3394,12 @@
                     })
                         .then(() => {
                             closeCustomPrompt();
-                            showNotification('COMPLETION VERIFIED');
+                            // v0.201: Show quest status modal with sound (for issuer)
+                            if (typeof showQuestStatusModal === 'function') {
+                                showQuestStatusModal('verified', q.title || 'UNKNOWN', 'Verified: ' + (prog?.completedByName || 'UNKNOWN'));
+                            } else {
+                                showNotification('COMPLETION VERIFIED');
+                            }
                             // v0.191: Log quest verified to chronicle
                             const completerName = prog?.completedByName || 'UNKNOWN';
                             logChronicleEvent('questVerify', uid, completerName, {
@@ -3686,16 +3705,49 @@
             }
         }
 
+        // v0.201: Track previous quest statuses to detect verification
+        let previousQuestStatuses = {};
+        
         function startQuestsListener() {
             if (!window.db) return;
             window.firebaseOnValue(window.firebaseRef(window.db, 'quests/'), (snap) => {
-                firebaseQuests = snap.val() || {};
-                const activeTab = document.querySelector('#quest-sub-nav .sub-nav-item.active');
-                if (activeTab) {
-                    const tabText = activeTab.textContent.trim();
-                    if (tabText === 'ACTIVE') renderActiveQuests();
-                    else if (tabText === 'AVAILABLE') renderAvailableQuests();
-                    else if (tabText === 'ISSUED') renderIssuedQuests();
+                try {
+                    const oldQuests = firebaseQuests;
+                    firebaseQuests = snap.val() || {};
+                    
+                    // v0.201: Check for newly verified quests (user's own quests)
+                    const myUid = myMailUid;
+                    if (myUid && typeof showQuestStatusModal === 'function') {
+                        Object.keys(firebaseQuests).forEach(id => {
+                            try {
+                                const q = firebaseQuests[id];
+                                const prog = q && q.progress && q.progress[myUid];
+                                if (prog) {
+                                    const oldProg = oldQuests && oldQuests[id] && oldQuests[id].progress && oldQuests[id].progress[myUid];
+                                    const oldStatus = oldProg && oldProg.status;
+                                    const newStatus = prog.status;
+                                    
+                                    // Detect status change to 'verified'
+                                    if (oldStatus !== 'verified' && newStatus === 'verified') {
+                                        // Quest was just verified - show modal
+                                        showQuestStatusModal('verified', q.title || 'UNKNOWN', 'Verified by: ' + (prog.verifiedByName || 'UNKNOWN'));
+                                    }
+                                }
+                            } catch (e) {
+                                console.error('Error checking quest verification for quest', id, ':', e);
+                            }
+                        });
+                    }
+                    
+                    const activeTab = document.querySelector('#quest-sub-nav .sub-nav-item.active');
+                    if (activeTab) {
+                        const tabText = activeTab.textContent.trim();
+                        if (tabText === 'ACTIVE') renderActiveQuests();
+                        else if (tabText === 'AVAILABLE') renderAvailableQuests();
+                        else if (tabText === 'ISSUED') renderIssuedQuests();
+                    }
+                } catch (e) {
+                    console.error('Error in quests listener:', e);
                 }
             }, () => {});
         }
@@ -7850,16 +7902,24 @@
                     { label: 'DECLINE', color: '#ff3333', action: () => declineLetter(key) }
                 ]);
             } else if (l.type === 'quest-rejected') {
-                // v0.194: Quest rejection notification with Johnny Guitar sound
+                // v0.201: Quest rejection modal with Johnny Guitar sound
                 const p = l.payload || {};
-                playSound('johnnyGuitar');
-                showCustomPrompt('QUEST REJECTED BY ' + from + ':\\n\\n"' + (p.title || '') + '"\\n\\nYour completion was rejected. The quest has been returned to your active quests.', [
-                    { label: 'DISMISS', action: () => { 
-                        markProcessed(key); 
-                        retireLetter(key); 
-                        if (mailTabActive()) renderMail();
-                    }}
-                ]);
+                if (typeof showQuestStatusModal === 'function') {
+                    showQuestStatusModal('rejected', p.title || 'UNKNOWN', 'Rejected by: ' + (p.rejectedBy || 'UNKNOWN'));
+                } else {
+                    playSound('johnnyGuitar');
+                    showCustomPrompt('QUEST REJECTED BY ' + from + ':\n\n"' + (p.title || '') + '"\n\nYour completion was rejected. The quest has been returned to your active quests.', [
+                        { label: 'DISMISS', action: () => { 
+                            markProcessed(key); 
+                            retireLetter(key); 
+                            if (mailTabActive()) renderMail();
+                        }}
+                    ]);
+                }
+                // Mark as processed and retire
+                markProcessed(key); 
+                retireLetter(key); 
+                if (mailTabActive()) renderMail();
             }
         }
 
@@ -10457,6 +10517,102 @@
                 
                 container.innerHTML = html;
             });
+        }
+
+        // ==================== QUEST STATUS MODAL SYSTEM (v0.201) ====================
+        // Shows modal with appropriate sounds for quest status changes
+        function showQuestStatusModal(status, questTitle, details = '') {
+            try {
+                const statusConfig = {
+                    completed: {
+                        title: '✓ QUEST COMPLETED',
+                        color: '#ffb642',
+                        sound: 'lunchbox',
+                        message: 'Your quest has been completed and is awaiting verification.',
+                        icon: '✓'
+                    },
+                    verified: {
+                        title: '✓ QUEST VERIFIED',
+                        color: '#5fc98e',
+                        sound: 'levelUp',
+                        message: 'Your quest completion has been verified!',
+                        icon: '✓'
+                    },
+                    expired: {
+                        title: '⏰ QUEST EXPIRED',
+                        color: '#ff3333',
+                        sound: 'johnnyGuitar',
+                        message: 'This quest has expired and was not completed in time.',
+                        icon: '⏰'
+                    },
+                    rejected: {
+                        title: '✗ QUEST REJECTED',
+                        color: '#ff3333',
+                        sound: 'johnnyGuitar',
+                        message: 'Your quest completion was rejected by the issuer.',
+                        icon: '✗'
+                    },
+                    abandoned: {
+                        title: '✗ QUEST ABANDONED',
+                        color: '#ff3333',
+                        sound: 'johnnyGuitar',
+                        message: 'You have abandoned this quest.',
+                        icon: '✗'
+                    },
+                    failed: {
+                        title: '✗ QUEST FAILED',
+                        color: '#ff3333',
+                        sound: 'johnnyGuitar',
+                        message: 'This quest has failed.',
+                        icon: '✗'
+                    }
+                };
+                
+                const config = statusConfig[status];
+                if (!config) {
+                    console.warn('Unknown quest status:', status);
+                    return;
+                }
+                
+                // Play sound (safely check if function exists)
+                if (typeof playSound === 'function') {
+                    playSound(config.sound);
+                }
+                
+                // Build modal content (safely escape HTML)
+                const escapeHtml = (s) => {
+                    if (typeof s !== 'string') return '';
+                    return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+                };
+                
+                const modalContent = `
+                    <div style="text-align: center; padding: 20px;">
+                        <div style="font-size: 4rem; color: ${config.color}; text-shadow: 0 0 20px ${config.color}; margin-bottom: 15px;">
+                            ${config.icon}
+                        </div>
+                        <h2 style="color: ${config.color}; text-shadow: 0 0 10px ${config.color}; margin: 0 0 15px 0;">
+                            ${config.title}
+                        </h2>
+                        <div style="font-size: 1.1rem; margin-bottom: 15px; opacity: 0.9;">
+                            ${escapeHtml(questTitle)}
+                        </div>
+                        <div style="font-size: 0.95rem; opacity: 0.8; margin-bottom: 20px;">
+                            ${config.message}
+                        </div>
+                        ${details ? `<div style="font-size: 0.9rem; opacity: 0.7; margin-bottom: 20px; padding: 10px; background: rgba(0,0,0,0.3); border-radius: 4px;">${escapeHtml(details)}</div>` : ''}
+                    </div>
+                `;
+                
+                // Show modal (safely check if function exists)
+                if (typeof showCustomPrompt === 'function') {
+                    showCustomPrompt(modalContent, [
+                        { label: 'CLOSE', action: () => {} }
+                    ]);
+                }
+            } catch (e) {
+                console.error('Error in showQuestStatusModal:', e);
+                // Don't let modal errors crash the app
+            }
         }
 
         // ==================== AUTO-ARCHIVE SYSTEM (v0.201) ====================
