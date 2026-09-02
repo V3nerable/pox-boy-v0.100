@@ -1600,6 +1600,8 @@
                         changed = true;
                         bumpFunStat('questsFailed', 1); // v0.176: Track failed quests
                         showNotification("QUEST EXPIRED: " + q.name);
+                        // v0.194: Play Johnny Guitar sound for quest timeout
+                        playSound('johnnyGuitar');
                     }
                 }
             });
@@ -2012,9 +2014,23 @@
                 // v0.107: Handle removed status with reason display
                 const isCancelled = q.status === 'cancelled';
                 const isRemoved = q.status === 'removed';
-                const isInactive = isCancelled || isRemoved;
-                const textDecoration = isInactive ? 'line-through' : 'none';
-                const opacity = isRemoved ? '0.4' : (isCancelled ? '0.5' : '1');
+                const isExpired = q.status === 'expired';
+                const isInactive = isCancelled || isRemoved || isExpired;
+                
+                // v0.193: Check if all progress is terminal (verified/rejected/abandoned)
+                let allProgressTerminal = false;
+                if (q.progress && Object.keys(q.progress).length > 0) {
+                    const terminalStatuses = ['verified', 'rejected', 'abandoned'];
+                    allProgressTerminal = Object.values(q.progress).every(p => 
+                        terminalStatuses.includes(p.status)
+                    );
+                }
+                
+                // Quest is "done" if inactive OR all progress is terminal
+                const isDone = isInactive || allProgressTerminal;
+                
+                const textDecoration = isDone ? 'line-through' : 'none';
+                const opacity = isRemoved ? '0.4' : (isCancelled || isExpired ? '0.5' : (isDone ? '0.6' : '1'));
                 
                 const pendingVerifications = [];
                 if (q.progress) {
@@ -2025,7 +2041,7 @@
                     });
                 }
                 const pendingCount = pendingVerifications.length;
-                const borderColor = isRemoved ? '#ff3333' : (isCancelled ? 'var(--pip-color-dim)' : (pendingCount > 0 ? '#ffb642' : 'var(--pip-color-dim)'));
+                const borderColor = isRemoved ? '#ff3333' : (isCancelled || isExpired ? 'var(--pip-color-dim)' : (pendingCount > 0 ? '#ffb642' : 'var(--pip-color-dim)'));
                 
                 let statusDisplay = q.status.toUpperCase();
                 let reasonDisplay = '';
@@ -2037,7 +2053,7 @@
                 html.push(`<div class="item-row" style="border-color:${borderColor}; opacity:${opacity};" onclick="openIssuedQuestModal('${id}')">
                     <div style="font-weight:bold; text-decoration:${textDecoration};">${escapeHtml(q.title)}</div>
                     <div style="font-size:0.85rem; opacity:0.7; text-decoration:${textDecoration};">${q.type.toUpperCase()} — ${statusDisplay}</div>
-                    ${!isInactive && pendingCount > 0 ? `<div style="font-size:0.85rem; color:#ffb642;">⏳ ${pendingCount} PENDING VERIFICATION${pendingCount > 1 ? 'S' : ''}</div>` : ''}
+                    ${!isDone && pendingCount > 0 ? `<div style="font-size:0.85rem; color:#ffb642;">⏳ ${pendingCount} PENDING VERIFICATION${pendingCount > 1 ? 'S' : ''}</div>` : ''}
                     ${reasonDisplay}
                 </div>`);
             });
@@ -3254,6 +3270,8 @@
                         .then(() => {
                             closeCustomPrompt();
                             showNotification('QUEST ABANDONED');
+                            // v0.194: Play Johnny Guitar sound for quest failure
+                            playSound('johnnyGuitar');
                             // v0.165: Switch to completed tab immediately (abandoned quests go there)
                             setTimeout(() => {
                                 switchQuestTab('completed');
@@ -3438,6 +3456,14 @@
                         .then(() => {
                             closeCustomPrompt();
                             showNotification('COMPLETION REJECTED - QUEST RETURNED TO ACTIVE');
+                            // v0.194: Send rejection mail to user with Johnny Guitar sound trigger
+                            if (q.progress && q.progress[uid] && q.progress[uid].completedByName) {
+                                queueMail(uid, 'quest-rejected', {
+                                    questId: id,
+                                    title: q.title,
+                                    rejectedBy: userProfile.name || 'UNKNOWN'
+                                }, 'QUEST REJECTED: ' + q.title);
+                            }
                             renderIssuedQuests();
                         })
                         .catch(err => showNotification('ERROR: ' + err.message));
@@ -7169,7 +7195,9 @@
                     xp: new Audio('xp.mp3'),
                     nuke: new Audio('nuke.mp3'),
                     // v0.191: SOS Morse code for Overseer broadcasts
-                    sos: new Audio('sos.mp3')
+                    sos: new Audio('sos.mp3'),
+                    // v0.194: Johnny Guitar for quest failures
+                    johnnyGuitar: new Audio('johnny-guitar.mp3')
                 };
                 
                 // Preload all sounds
@@ -7771,6 +7799,17 @@
                 showCustomPrompt('ITEM FROM ' + from + ': ' + (p.name || 'UNKNOWN') + ' x' + (p.quantity || 1) + '. ADD TO INVENTORY?', [
                     { label: 'TAKE ITEM', action: () => acceptItem(key, l) },
                     { label: 'DECLINE', color: '#ff3333', action: () => declineLetter(key) }
+                ]);
+            } else if (l.type === 'quest-rejected') {
+                // v0.194: Quest rejection notification with Johnny Guitar sound
+                const p = l.payload || {};
+                playSound('johnnyGuitar');
+                showCustomPrompt('QUEST REJECTED BY ' + from + ':\\n\\n"' + (p.title || '') + '"\\n\\nYour completion was rejected. The quest has been returned to your active quests.', [
+                    { label: 'DISMISS', action: () => { 
+                        markProcessed(key); 
+                        retireLetter(key); 
+                        if (mailTabActive()) renderMail();
+                    }}
                 ]);
             }
         }
