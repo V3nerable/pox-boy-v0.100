@@ -3734,7 +3734,8 @@
             if (!window.db) return;
             window.firebaseOnValue(window.firebaseRef(window.db, 'quests/'), (snap) => {
                 try {
-                    const oldQuests = firebaseQuests;
+                    // v0.205: Make a deep copy of old quests to properly detect changes
+                    const oldQuests = JSON.parse(JSON.stringify(firebaseQuests || {}));
                     firebaseQuests = snap.val() || {};
                     
                     // v0.201: Check for newly verified quests (user's own quests)
@@ -3745,7 +3746,7 @@
                                 const q = firebaseQuests[id];
                                 const prog = q && q.progress && q.progress[myUid];
                                 if (prog) {
-                                    const oldProg = oldQuests && oldQuests[id] && oldQuests[id].progress && oldQuests[id].progress[myUid];
+                                    const oldProg = oldQuests[id] && oldQuests[id].progress && oldQuests[id].progress[myUid];
                                     const oldStatus = oldProg && oldProg.status;
                                     const newStatus = prog.status;
                                     
@@ -10617,8 +10618,10 @@
                 };
                 
                 // Build modal HTML
+                // Build modal HTML with unique ID
+                const modalId = 'quest-status-modal-' + Date.now();
                 const modalHtml = `
-                    <div id="quest-status-modal" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.85); z-index: 10000; display: flex; align-items: center; justify-content: center; padding: 20px;">
+                    <div id="${modalId}" class="quest-status-modal" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.85); z-index: 10000; display: flex; align-items: center; justify-content: center; padding: 20px;">
                         <div style="background: var(--pip-bg, #0a0a0a); border: 2px solid ${config.color}; border-radius: 8px; max-width: 500px; width: 100%; box-shadow: 0 0 30px ${config.color}40; max-height: 90vh; overflow-y: auto;">
                             <div style="text-align: center; padding: 30px 20px;">
                                 <div style="font-size: 5rem; color: ${config.color}; text-shadow: 0 0 30px ${config.color}; margin-bottom: 20px; line-height: 1;">
@@ -10634,13 +10637,17 @@
                                     ${config.message}
                                 </div>
                                 ${details ? `<div style="font-size: 0.95rem; opacity: 0.75; margin-bottom: 25px; padding: 15px; background: rgba(0,0,0,0.4); border-radius: 6px; border: 1px solid ${config.color}40; color: var(--pip-color, #1aff80);">${escapeHtml(details)}</div>` : ''}
-                                <button class="pip-btn" onclick="document.getElementById('quest-status-modal').remove()" style="border-color: ${config.color}; color: ${config.color}; padding: 12px 30px; font-size: 1.1rem;">
+                                <button class="pip-btn" onclick="document.getElementById('${modalId}').remove()" style="border-color: ${config.color}; color: ${config.color}; padding: 12px 30px; font-size: 1.1rem;">
                                     [CLOSE]
                                 </button>
                             </div>
                         </div>
                     </div>
                 `;
+                
+                // v0.205: Remove any existing quest status modals before creating new one
+                const existingModals = document.querySelectorAll('.quest-status-modal');
+                existingModals.forEach(modal => modal.remove());
                 
                 // Insert modal into DOM
                 document.body.insertAdjacentHTML('beforeend', modalHtml);
