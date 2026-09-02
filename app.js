@@ -1599,8 +1599,9 @@
                         q.expired = true;
                         changed = true;
                         bumpFunStat('questsFailed', 1); // v0.176: Track failed quests
-                        // v0.198: Show quest status modal with sound
-                        showQuestStatusModal('expired', q.name || 'UNKNOWN');
+                        showNotification("QUEST EXPIRED: " + q.name);
+                        // v0.194: Play Johnny Guitar sound for quest timeout
+                        playSound('johnnyGuitar');
                     }
                 }
             });
@@ -3268,9 +3269,9 @@
                     })
                         .then(() => {
                             closeCustomPrompt();
-                            // v0.198: Show quest status modal with sound
-                            const q = firebaseQuests[id];
-                            showQuestStatusModal('abandoned', q?.title || 'UNKNOWN');
+                            showNotification('QUEST ABANDONED');
+                            // v0.194: Play Johnny Guitar sound for quest failure
+                            playSound('johnnyGuitar');
                             // v0.165: Switch to completed tab immediately (abandoned quests go there)
                             setTimeout(() => {
                                 switchQuestTab('completed');
@@ -3323,8 +3324,7 @@
                 window.firebaseUpdate(progRef, updates)
                     .then(() => {
                         closeCustomPrompt();
-                        // v0.198: Show quest status modal with sound
-                        showQuestStatusModal('completed', q.title || 'UNKNOWN');
+                        showNotification('QUEST COMPLETED - AWAITING VERIFICATION');
                         // v0.191: Log quest completed to chronicle
                         logChronicleEvent('questComplete', myUid, myName, {
                             questTitle: q.title || 'UNKNOWN',
@@ -3686,49 +3686,16 @@
             }
         }
 
-        // v0.198: Track previous quest statuses to detect verification
-        let previousQuestStatuses = {};
-        
         function startQuestsListener() {
             if (!window.db) return;
             window.firebaseOnValue(window.firebaseRef(window.db, 'quests/'), (snap) => {
-                try {
-                    const oldQuests = firebaseQuests;
-                    firebaseQuests = snap.val() || {};
-                    
-                    // v0.198: Check for newly verified quests
-                    const myUid = myMailUid;
-                    if (myUid) {
-                        Object.keys(firebaseQuests).forEach(id => {
-                            try {
-                                const q = firebaseQuests[id];
-                                const prog = q && q.progress && q.progress[myUid];
-                                if (prog) {
-                                    const oldProg = oldQuests && oldQuests[id] && oldQuests[id].progress && oldQuests[id].progress[myUid];
-                                    const oldStatus = oldProg && oldProg.status;
-                                    const newStatus = prog.status;
-                                    
-                                    // Detect status change to 'verified'
-                                    if (oldStatus !== 'verified' && newStatus === 'verified') {
-                                        // Quest was just verified - show modal
-                                        showQuestStatusModal('verified', q.title || 'UNKNOWN', 'Verified by: ' + (prog.verifiedByName || 'UNKNOWN'));
-                                    }
-                                }
-                            } catch (e) {
-                                console.error('Error checking quest verification for quest', id, ':', e);
-                            }
-                        });
-                    }
-                    
-                    const activeTab = document.querySelector('#quest-sub-nav .sub-nav-item.active');
-                    if (activeTab) {
-                        const tabText = activeTab.textContent.trim();
-                        if (tabText === 'ACTIVE') renderActiveQuests();
-                        else if (tabText === 'AVAILABLE') renderAvailableQuests();
-                        else if (tabText === 'ISSUED') renderIssuedQuests();
-                    }
-                } catch (e) {
-                    console.error('Error in quests listener:', e);
+                firebaseQuests = snap.val() || {};
+                const activeTab = document.querySelector('#quest-sub-nav .sub-nav-item.active');
+                if (activeTab) {
+                    const tabText = activeTab.textContent.trim();
+                    if (tabText === 'ACTIVE') renderActiveQuests();
+                    else if (tabText === 'AVAILABLE') renderAvailableQuests();
+                    else if (tabText === 'ISSUED') renderIssuedQuests();
                 }
             }, () => {});
         }
@@ -6661,163 +6628,83 @@
         let lastStorageErrorTime = 0;
         const STORAGE_ERROR_COOLDOWN = 30000; // 30 seconds between error notifications
         
-        // ==================== AUTO-ARCHIVE SYSTEM (v0.198) ====================
-        // Archives old data to JSON downloads instead of deleting
-        const ARCHIVE_AGE_DAYS = 30;
-        const ARCHIVE_CHECK_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours
-        const STORAGE_EMERGENCY_THRESHOLD = 0.90; // 90% capacity
-        let lastArchiveCheck = parseInt(localStorage.getItem('pipboy-last-archive-check') || '0');
-        
-        function checkAndArchiveOldData(manual = false, customAgeDays = null) {
-            try {
-                const now = Date.now();
-                const archiveAgeDays = customAgeDays !== null ? customAgeDays : ARCHIVE_AGE_DAYS;
-                const archiveThreshold = now - (archiveAgeDays * 24 * 60 * 60 * 1000);
-                
-                // Only run once per 24 hours unless manual
-                if (!manual && (now - lastArchiveCheck) < ARCHIVE_CHECK_INTERVAL) {
-                    return;
-                }
-                
-                console.log('Checking for old data to archive (threshold: ' + archiveAgeDays + ' days)...');
-                
-                // Defensive checks - ensure all required variables exist
-                if (typeof mailLog === 'undefined') mailLog = [];
-                if (typeof outbox === 'undefined') outbox = [];
-                if (typeof mailSeen === 'undefined') mailSeen = [];
-                if (typeof mailProcessed === 'undefined') mailProcessed = [];
-                if (typeof rolodex === 'undefined') rolodex = [];
-                if (typeof linkScans === 'undefined') linkScans = {};
-                
-                const archiveData = {
-                    archiveDate: new Date(now).toISOString(),
-                    version: 'v0.199',
-                    data: {}
-                };
-                
-                let hasDataToArchive = false;
-                
-                // Archive old mail log entries
-                if (mailLog.length > 0) {
-                    const oldMails = mailLog.filter(m => m && m.ts && m.ts < archiveThreshold);
-                    if (oldMails.length > 0) {
-                        archiveData.data.mailLog = oldMails;
-                        mailLog = mailLog.filter(m => !m || !m.ts || m.ts >= archiveThreshold);
-                        hasDataToArchive = true;
-                    }
-                }
-                
-                // Archive old outbox entries (sent mails)
-                if (outbox.length > 0) {
-                    const oldOutbox = outbox.filter(o => o && o.ts && o.ts < archiveThreshold && o.status === 'sent');
-                    if (oldOutbox.length > 0) {
-                        archiveData.data.outbox = oldOutbox;
-                        outbox = outbox.filter(o => !o || !o.ts || o.ts >= archiveThreshold || o.status !== 'sent');
-                        hasDataToArchive = true;
-                    }
-                }
-                
-                // Archive old mail-seen IDs (keep last 500)
-                if (mailSeen.length > 500) {
-                    const oldSeen = mailSeen.slice(0, -500);
-                    archiveData.data.mailSeen = oldSeen;
-                    mailSeen = mailSeen.slice(-500);
-                    hasDataToArchive = true;
-                }
-                
-                // Archive old mail-processed IDs (keep last 500)
-                if (mailProcessed.length > 500) {
-                    const oldProcessed = mailProcessed.slice(0, -500);
-                    archiveData.data.mailProcessed = oldProcessed;
-                    mailProcessed = mailProcessed.slice(-500);
-                    hasDataToArchive = true;
-                }
-                
-                // If we have data to archive, download it and save
-                if (hasDataToArchive) {
-                    const archiveJson = JSON.stringify(archiveData, null, 2);
-                    const blob = new Blob([archiveJson], { type: 'application/json' });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    const dateStr = new Date(now).toISOString().split('T')[0];
-                    a.href = url;
-                    a.download = `poxboy-archive-${dateStr}.json`;
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
-                    URL.revokeObjectURL(url);
-                    
-                    // Save cleaned data to localStorage
-                    saveComms();
-                    
-                    const itemCount = Object.values(archiveData.data).reduce((sum, arr) => sum + (Array.isArray(arr) ? arr.length : 0), 0);
-                    showNotification(`📦 Archived ${itemCount} old items to ${a.download}`);
-                } else if (manual) {
-                    showNotification('No old data to archive (data is newer than ' + archiveAgeDays + ' days)');
-                }
-                
-                // Update last check time
-                lastArchiveCheck = now;
-                localStorage.setItem('pipboy-last-archive-check', now.toString());
-            } catch (e) {
-                console.error('Error in checkAndArchiveOldData:', e);
-                // Don't let archive errors crash the app
-                if (manual) {
-                    showNotification('Archive error: ' + e.message);
-                }
-            }
-        }
-        
-        // Emergency archive if storage is >90% full
-        function emergencyArchiveIfNeeded() {
-            try {
-                // Estimate localStorage usage
-                let totalSize = 0;
-                for (let key in localStorage) {
-                    if (localStorage.hasOwnProperty(key)) {
-                        totalSize += localStorage[key].length;
-                    }
-                }
-                const estimatedUsage = totalSize / (5 * 1024 * 1024); // Assume 5MB limit
-                
-                if (estimatedUsage > STORAGE_EMERGENCY_THRESHOLD) {
-                    console.warn(`Storage at ${Math.round(estimatedUsage * 100)}% - triggering emergency archive`);
-                    // Force archive with shorter threshold (7 days instead of 30)
-                    checkAndArchiveOldData(true, 7);
-                }
-            } catch (e) {
-                console.error('Error checking storage usage:', e);
-            }
-        }
-
-        // ==================== SAVE COMMS WITH ARCHIVE (v0.198) ====================
         function saveComms() {
             try {
                 localStorage.setItem('pipboy-rolodex', JSON.stringify(rolodex));
                 localStorage.setItem('pipboy-outbox', JSON.stringify(outbox));
                 localStorage.setItem('pipboy-maillog', JSON.stringify(mailLog));
                 localStorage.setItem('pipboy-mail-seen', JSON.stringify(mailSeen.slice(-500)));
-                localStorage.setItem('pipboy-linkscans', JSON.stringify(linkScans));
+                localStorage.setItem('pipboy-linkscans', JSON.stringify(linkScans)); // v0.45
             } catch (e) {
                 if (e.name === 'QuotaExceededError' || e.code === 22) {
-                    // Storage full - trigger emergency archive
-                    console.warn('Storage quota exceeded, triggering emergency archive');
-                    emergencyArchiveIfNeeded();
+                    // v0.196: Storage quota exceeded - try progressive cleanup
+                    console.warn('Storage quota exceeded, attempting cleanup');
                     
-                    // Try saving again after archive
+                    // v0.196: STAGE 1 - Moderate cleanup (keep 50 items)
                     try {
+                        const moderateOutbox = outbox.slice(-50);
+                        const moderateMailLog = mailLog.slice(-50);
+                        const moderateMailSeen = mailSeen.slice(-200);
+                        
                         localStorage.setItem('pipboy-rolodex', JSON.stringify(rolodex));
-                        localStorage.setItem('pipboy-outbox', JSON.stringify(outbox));
-                        localStorage.setItem('pipboy-maillog', JSON.stringify(mailLog));
-                        localStorage.setItem('pipboy-mail-seen', JSON.stringify(mailSeen.slice(-500)));
+                        localStorage.setItem('pipboy-outbox', JSON.stringify(moderateOutbox));
+                        localStorage.setItem('pipboy-maillog', JSON.stringify(moderateMailLog));
+                        localStorage.setItem('pipboy-mail-seen', JSON.stringify(moderateMailSeen));
                         localStorage.setItem('pipboy-linkscans', JSON.stringify(linkScans));
+                        
+                        // Success - update actual arrays
+                        outbox = moderateOutbox;
+                        mailLog = moderateMailLog;
+                        mailSeen = moderateMailSeen;
+                        
+                        showNotification('STORAGE CLEANUP: Kept last 50 items');
+                        return; // Exit early - cleanup succeeded
+                    } catch (e1) {
+                        console.warn('Moderate cleanup failed, trying aggressive cleanup');
+                    }
+                    
+                    // v0.196: STAGE 2 - Aggressive cleanup (keep 20 items + reduce photos)
+                    try {
+                        const aggressiveOutbox = outbox.slice(-20);
+                        const aggressiveMailLog = mailLog.slice(-20);
+                        const aggressiveMailSeen = mailSeen.slice(-100);
+                        
+                        // Also clean photos if they exist (biggest storage consumer)
+                        if (typeof photoArchive !== 'undefined' && photoArchive.length > 20) {
+                            photoArchive = photoArchive.slice(-20);
+                            try {
+                                localStorage.setItem('pipboy-photos', JSON.stringify(photoArchive));
+                            } catch (photoErr) {
+                                console.warn('Could not save cleaned photo archive:', photoErr);
+                            }
+                        }
+                        
+                        localStorage.setItem('pipboy-rolodex', JSON.stringify(rolodex));
+                        localStorage.setItem('pipboy-outbox', JSON.stringify(aggressiveOutbox));
+                        localStorage.setItem('pipboy-maillog', JSON.stringify(aggressiveMailLog));
+                        localStorage.setItem('pipboy-mail-seen', JSON.stringify(aggressiveMailSeen));
+                        localStorage.setItem('pipboy-linkscans', JSON.stringify(linkScans));
+                        
+                        if (typeof mailProcessed !== 'undefined') {
+                            const aggressiveMailProcessed = mailProcessed.slice(-100);
+                            localStorage.setItem('pipboy-mail-processed', JSON.stringify(aggressiveMailProcessed));
+                            mailProcessed = aggressiveMailProcessed;
+                        }
+                        
+                        // Success - update actual arrays
+                        outbox = aggressiveOutbox;
+                        mailLog = aggressiveMailLog;
+                        mailSeen = aggressiveMailSeen;
+                        
+                        showNotification('STORAGE CLEANUP: Kept last 20 items, reduced photos');
+                        return; // Exit early - cleanup succeeded
                     } catch (e2) {
-                        console.error('Still cannot save after emergency archive:', e2);
-                        // Last resort: show error
+                        console.error('Aggressive cleanup also failed:', e2);
+                        // v0.195: Only show error if cooldown has passed
                         const now = Date.now();
                         if (now - lastStorageErrorTime > STORAGE_ERROR_COOLDOWN) {
                             lastStorageErrorTime = now;
-                            showNotification('ERROR: Storage full - archived old data but still cannot save. Try deleting photos manually.');
+                            showNotification('ERROR: Storage full - cannot save data. Try deleting old photos.');
                         }
                     }
                 } else {
@@ -6825,93 +6712,6 @@
                 }
             }
         }
-
-        // v0.195: Cooldown flag to prevent error spam
-        let lastStorageErrorTime = 0;
-        const STORAGE_ERROR_COOLDOWN = 30000; // 30 seconds between error notifications
-
-        // ==================== QUEST STATUS MODAL SYSTEM (v0.198) ====================
-        // Shows modal with appropriate sounds for quest status changes
-        function showQuestStatusModal(status, questTitle, details = '') {
-            const statusConfig = {
-                completed: {
-                    title: '✓ QUEST COMPLETED',
-                    color: '#ffb642',
-                    sound: 'lunchbox',
-                    message: 'Your quest has been completed and is awaiting verification.',
-                    icon: '✓'
-                },
-                verified: {
-                    title: '✓ QUEST VERIFIED',
-                    color: '#5fc98e',
-                    sound: 'levelUp',
-                    message: 'Your quest completion has been verified!',
-                    icon: '✓'
-                },
-                expired: {
-                    title: '⏰ QUEST EXPIRED',
-                    color: '#ff3333',
-                    sound: 'johnnyGuitar',
-                    message: 'This quest has expired and was not completed in time.',
-                    icon: '⏰'
-                },
-                rejected: {
-                    title: '✗ QUEST REJECTED',
-                    color: '#ff3333',
-                    sound: 'johnnyGuitar',
-                    message: 'Your quest completion was rejected by the issuer.',
-                    icon: '✗'
-                },
-                abandoned: {
-                    title: '✗ QUEST ABANDONED',
-                    color: '#ff3333',
-                    sound: 'johnnyGuitar',
-                    message: 'You have abandoned this quest.',
-                    icon: '✗'
-                },
-                failed: {
-                    title: '✗ QUEST FAILED',
-                    color: '#ff3333',
-                    sound: 'johnnyGuitar',
-                    message: 'This quest has failed.',
-                    icon: '✗'
-                }
-            };
-            
-            const config = statusConfig[status];
-            if (!config) {
-                console.warn('Unknown quest status:', status);
-                return;
-            }
-            
-            // Play sound
-            playSound(config.sound);
-            
-            // Build modal content
-            const modalContent = `
-                <div style="text-align: center; padding: 20px;">
-                    <div style="font-size: 4rem; color: ${config.color}; text-shadow: 0 0 20px ${config.color}; margin-bottom: 15px;">
-                        ${config.icon}
-                    </div>
-                    <h2 style="color: ${config.color}; text-shadow: 0 0 10px ${config.color}; margin: 0 0 15px 0;">
-                        ${config.title}
-                    </h2>
-                    <div style="font-size: 1.1rem; margin-bottom: 15px; opacity: 0.9;">
-                        ${escapeHtml(questTitle)}
-                    </div>
-                    <div style="font-size: 0.95rem; opacity: 0.8; margin-bottom: 20px;">
-                        ${config.message}
-                    </div>
-                    ${details ? `<div style="font-size: 0.9rem; opacity: 0.7; margin-bottom: 20px; padding: 10px; background: rgba(0,0,0,0.3); border-radius: 4px;">${escapeHtml(details)}</div>` : ''}
-                </div>
-            `;
-            
-            // Show modal
-            showCustomPrompt(modalContent, [
-                { label: 'CLOSE', action: () => {} }
-            ]);
-        }
-
         function saveProcessed() {
             localStorage.setItem('pipboy-mail-processed', JSON.stringify(mailProcessed.slice(-500)));
         }
@@ -8050,13 +7850,16 @@
                     { label: 'DECLINE', color: '#ff3333', action: () => declineLetter(key) }
                 ]);
             } else if (l.type === 'quest-rejected') {
-                // v0.198: Quest rejection modal with Johnny Guitar sound
+                // v0.194: Quest rejection notification with Johnny Guitar sound
                 const p = l.payload || {};
-                showQuestStatusModal('rejected', p.title || 'UNKNOWN', 'Rejected by: ' + (p.rejectedBy || 'UNKNOWN'));
-                // Mark as processed and retire
-                markProcessed(key); 
-                retireLetter(key); 
-                if (mailTabActive()) renderMail();
+                playSound('johnnyGuitar');
+                showCustomPrompt('QUEST REJECTED BY ' + from + ':\\n\\n"' + (p.title || '') + '"\\n\\nYour completion was rejected. The quest has been returned to your active quests.', [
+                    { label: 'DISMISS', action: () => { 
+                        markProcessed(key); 
+                        retireLetter(key); 
+                        if (mailTabActive()) renderMail();
+                    }}
+                ]);
             }
         }
 
@@ -10143,9 +9946,11 @@
             if (chronicleSubNav) chronicleSubNav.style.display = 'block';
         }
 
-        // v0.198: Auto-archive old data on app startup (once per 24 hours)
+        // v0.201: Auto-archive old data on app startup (once per 24 hours)
         try {
-            checkAndArchiveOldData(false);
+            if (typeof checkAndArchiveOldData === 'function') {
+                checkAndArchiveOldData(false);
+            }
         } catch (e) {
             console.error('Error during auto-archive on startup:', e);
             // Don't let archive errors prevent app from loading
@@ -10652,6 +10457,107 @@
                 
                 container.innerHTML = html;
             });
+        }
+
+        // ==================== AUTO-ARCHIVE SYSTEM (v0.201) ====================
+        // Archives old data to JSON downloads instead of deleting
+        const ARCHIVE_AGE_DAYS = 30;
+        const ARCHIVE_CHECK_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours
+        const STORAGE_EMERGENCY_THRESHOLD = 0.90; // 90% capacity
+        let lastArchiveCheck = 0;
+        
+        function checkAndArchiveOldData(manual = false, customAgeDays = null) {
+            try {
+                const now = Date.now();
+                const archiveAgeDays = customAgeDays !== null ? customAgeDays : ARCHIVE_AGE_DAYS;
+                const archiveThreshold = now - (archiveAgeDays * 24 * 60 * 60 * 1000);
+                
+                // Only run once per 24 hours unless manual
+                if (!manual && (now - lastArchiveCheck) < ARCHIVE_CHECK_INTERVAL) {
+                    return;
+                }
+                
+                console.log('Checking for old data to archive (threshold: ' + archiveAgeDays + ' days)...');
+                
+                const archiveData = {
+                    archiveDate: new Date(now).toISOString(),
+                    version: 'v0.201',
+                    data: {}
+                };
+                
+                let hasDataToArchive = false;
+                
+                // Archive old mail log entries (safely check if mailLog exists)
+                if (typeof mailLog !== 'undefined' && Array.isArray(mailLog) && mailLog.length > 0) {
+                    const oldMails = mailLog.filter(m => m && m.ts && m.ts < archiveThreshold);
+                    if (oldMails.length > 0) {
+                        archiveData.data.mailLog = oldMails;
+                        mailLog = mailLog.filter(m => !m || !m.ts || m.ts >= archiveThreshold);
+                        hasDataToArchive = true;
+                    }
+                }
+                
+                // Archive old outbox entries (sent mails)
+                if (typeof outbox !== 'undefined' && Array.isArray(outbox) && outbox.length > 0) {
+                    const oldOutbox = outbox.filter(o => o && o.ts && o.ts < archiveThreshold && o.status === 'sent');
+                    if (oldOutbox.length > 0) {
+                        archiveData.data.outbox = oldOutbox;
+                        outbox = outbox.filter(o => !o || !o.ts || o.ts >= archiveThreshold || o.status !== 'sent');
+                        hasDataToArchive = true;
+                    }
+                }
+                
+                // Archive old mail-seen IDs (keep last 500)
+                if (typeof mailSeen !== 'undefined' && Array.isArray(mailSeen) && mailSeen.length > 500) {
+                    const oldSeen = mailSeen.slice(0, -500);
+                    archiveData.data.mailSeen = oldSeen;
+                    mailSeen = mailSeen.slice(-500);
+                    hasDataToArchive = true;
+                }
+                
+                // If we have data to archive, download it and save
+                if (hasDataToArchive) {
+                    const archiveJson = JSON.stringify(archiveData, null, 2);
+                    const blob = new Blob([archiveJson], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    const dateStr = new Date(now).toISOString().split('T')[0];
+                    a.href = url;
+                    a.download = `poxboy-archive-${dateStr}.json`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    
+                    // Save cleaned data to localStorage
+                    if (typeof saveComms === 'function') {
+                        saveComms();
+                    }
+                    
+                    const itemCount = Object.values(archiveData.data).reduce((sum, arr) => sum + (Array.isArray(arr) ? arr.length : 0), 0);
+                    if (typeof showNotification === 'function') {
+                        showNotification(`📦 Archived ${itemCount} old items to ${a.download}`);
+                    }
+                } else if (manual) {
+                    if (typeof showNotification === 'function') {
+                        showNotification('No old data to archive (data is newer than ' + archiveAgeDays + ' days)');
+                    }
+                }
+                
+                // Update last check time
+                lastArchiveCheck = now;
+                try {
+                    localStorage.setItem('pipboy-last-archive-check', now.toString());
+                } catch (e) {
+                    console.warn('Could not save last archive check time:', e);
+                }
+            } catch (e) {
+                console.error('Error in checkAndArchiveOldData:', e);
+                // Don't let archive errors crash the app
+                if (manual && typeof showNotification === 'function') {
+                    showNotification('Archive error: ' + e.message);
+                }
+            }
         }
 
         // ==================== LIVING WASTELAND CHRONICLE (v0.185) ====================
