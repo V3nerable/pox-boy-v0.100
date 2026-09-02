@@ -3692,33 +3692,43 @@
         function startQuestsListener() {
             if (!window.db) return;
             window.firebaseOnValue(window.firebaseRef(window.db, 'quests/'), (snap) => {
-                const oldQuests = firebaseQuests;
-                firebaseQuests = snap.val() || {};
-                
-                // v0.198: Check for newly verified quests
-                const myUid = myMailUid;
-                Object.keys(firebaseQuests).forEach(id => {
-                    const q = firebaseQuests[id];
-                    const prog = q.progress && q.progress[myUid];
-                    if (prog) {
-                        const oldProg = oldQuests[id]?.progress?.[myUid];
-                        const oldStatus = oldProg?.status;
-                        const newStatus = prog.status;
-                        
-                        // Detect status change to 'verified'
-                        if (oldStatus !== 'verified' && newStatus === 'verified') {
-                            // Quest was just verified - show modal
-                            showQuestStatusModal('verified', q.title || 'UNKNOWN', 'Verified by: ' + (prog.verifiedByName || 'UNKNOWN'));
-                        }
+                try {
+                    const oldQuests = firebaseQuests;
+                    firebaseQuests = snap.val() || {};
+                    
+                    // v0.198: Check for newly verified quests
+                    const myUid = myMailUid;
+                    if (myUid) {
+                        Object.keys(firebaseQuests).forEach(id => {
+                            try {
+                                const q = firebaseQuests[id];
+                                const prog = q && q.progress && q.progress[myUid];
+                                if (prog) {
+                                    const oldProg = oldQuests && oldQuests[id] && oldQuests[id].progress && oldQuests[id].progress[myUid];
+                                    const oldStatus = oldProg && oldProg.status;
+                                    const newStatus = prog.status;
+                                    
+                                    // Detect status change to 'verified'
+                                    if (oldStatus !== 'verified' && newStatus === 'verified') {
+                                        // Quest was just verified - show modal
+                                        showQuestStatusModal('verified', q.title || 'UNKNOWN', 'Verified by: ' + (prog.verifiedByName || 'UNKNOWN'));
+                                    }
+                                }
+                            } catch (e) {
+                                console.error('Error checking quest verification for quest', id, ':', e);
+                            }
+                        });
                     }
-                });
-                
-                const activeTab = document.querySelector('#quest-sub-nav .sub-nav-item.active');
-                if (activeTab) {
-                    const tabText = activeTab.textContent.trim();
-                    if (tabText === 'ACTIVE') renderActiveQuests();
-                    else if (tabText === 'AVAILABLE') renderAvailableQuests();
-                    else if (tabText === 'ISSUED') renderIssuedQuests();
+                    
+                    const activeTab = document.querySelector('#quest-sub-nav .sub-nav-item.active');
+                    if (activeTab) {
+                        const tabText = activeTab.textContent.trim();
+                        if (tabText === 'ACTIVE') renderActiveQuests();
+                        else if (tabText === 'AVAILABLE') renderAvailableQuests();
+                        else if (tabText === 'ISSUED') renderIssuedQuests();
+                    }
+                } catch (e) {
+                    console.error('Error in quests listener:', e);
                 }
             }, () => {});
         }
@@ -6659,94 +6669,103 @@
         let lastArchiveCheck = parseInt(localStorage.getItem('pipboy-last-archive-check') || '0');
         
         function checkAndArchiveOldData(manual = false, customAgeDays = null) {
-            const now = Date.now();
-            const archiveAgeDays = customAgeDays !== null ? customAgeDays : ARCHIVE_AGE_DAYS;
-            const archiveThreshold = now - (archiveAgeDays * 24 * 60 * 60 * 1000);
-            
-            // Only run once per 24 hours unless manual
-            if (!manual && (now - lastArchiveCheck) < ARCHIVE_CHECK_INTERVAL) {
-                return;
-            }
-            
-            console.log('Checking for old data to archive (threshold: ' + archiveAgeDays + ' days)...');
-            
-            const archiveData = {
-                archiveDate: new Date(now).toISOString(),
-                version: 'v0.198',
-                data: {}
-            };
-            
-            let hasDataToArchive = false;
-            
-            // Archive old photos (older than 30 days)
-            if (typeof photoArchive !== 'undefined' && photoArchive.length > 0) {
-                // Photos don't have timestamps, so archive oldest 50% if storage is full
-                // For now, skip photo archiving (keep all photos)
-                // TODO: Add timestamp to photos for proper age-based archiving
-            }
-            
-            // Archive old mail log entries
-            if (mailLog.length > 0) {
-                const oldMails = mailLog.filter(m => m.ts && m.ts < archiveThreshold);
-                if (oldMails.length > 0) {
-                    archiveData.data.mailLog = oldMails;
-                    mailLog = mailLog.filter(m => !m.ts || m.ts >= archiveThreshold);
+            try {
+                const now = Date.now();
+                const archiveAgeDays = customAgeDays !== null ? customAgeDays : ARCHIVE_AGE_DAYS;
+                const archiveThreshold = now - (archiveAgeDays * 24 * 60 * 60 * 1000);
+                
+                // Only run once per 24 hours unless manual
+                if (!manual && (now - lastArchiveCheck) < ARCHIVE_CHECK_INTERVAL) {
+                    return;
+                }
+                
+                console.log('Checking for old data to archive (threshold: ' + archiveAgeDays + ' days)...');
+                
+                // Defensive checks - ensure all required variables exist
+                if (typeof mailLog === 'undefined') mailLog = [];
+                if (typeof outbox === 'undefined') outbox = [];
+                if (typeof mailSeen === 'undefined') mailSeen = [];
+                if (typeof mailProcessed === 'undefined') mailProcessed = [];
+                if (typeof rolodex === 'undefined') rolodex = [];
+                if (typeof linkScans === 'undefined') linkScans = {};
+                
+                const archiveData = {
+                    archiveDate: new Date(now).toISOString(),
+                    version: 'v0.199',
+                    data: {}
+                };
+                
+                let hasDataToArchive = false;
+                
+                // Archive old mail log entries
+                if (mailLog.length > 0) {
+                    const oldMails = mailLog.filter(m => m && m.ts && m.ts < archiveThreshold);
+                    if (oldMails.length > 0) {
+                        archiveData.data.mailLog = oldMails;
+                        mailLog = mailLog.filter(m => !m || !m.ts || m.ts >= archiveThreshold);
+                        hasDataToArchive = true;
+                    }
+                }
+                
+                // Archive old outbox entries (sent mails)
+                if (outbox.length > 0) {
+                    const oldOutbox = outbox.filter(o => o && o.ts && o.ts < archiveThreshold && o.status === 'sent');
+                    if (oldOutbox.length > 0) {
+                        archiveData.data.outbox = oldOutbox;
+                        outbox = outbox.filter(o => !o || !o.ts || o.ts >= archiveThreshold || o.status !== 'sent');
+                        hasDataToArchive = true;
+                    }
+                }
+                
+                // Archive old mail-seen IDs (keep last 500)
+                if (mailSeen.length > 500) {
+                    const oldSeen = mailSeen.slice(0, -500);
+                    archiveData.data.mailSeen = oldSeen;
+                    mailSeen = mailSeen.slice(-500);
                     hasDataToArchive = true;
                 }
-            }
-            
-            // Archive old outbox entries (sent mails)
-            if (outbox.length > 0) {
-                const oldOutbox = outbox.filter(o => o.ts && o.ts < archiveThreshold && o.status === 'sent');
-                if (oldOutbox.length > 0) {
-                    archiveData.data.outbox = oldOutbox;
-                    outbox = outbox.filter(o => !o.ts || o.ts >= archiveThreshold || o.status !== 'sent');
+                
+                // Archive old mail-processed IDs (keep last 500)
+                if (mailProcessed.length > 500) {
+                    const oldProcessed = mailProcessed.slice(0, -500);
+                    archiveData.data.mailProcessed = oldProcessed;
+                    mailProcessed = mailProcessed.slice(-500);
                     hasDataToArchive = true;
                 }
-            }
-            
-            // Archive old mail-seen IDs (keep last 500)
-            if (mailSeen.length > 500) {
-                const oldSeen = mailSeen.slice(0, -500);
-                archiveData.data.mailSeen = oldSeen;
-                mailSeen = mailSeen.slice(-500);
-                hasDataToArchive = true;
-            }
-            
-            // Archive old mail-processed IDs (keep last 500)
-            if (typeof mailProcessed !== 'undefined' && mailProcessed.length > 500) {
-                const oldProcessed = mailProcessed.slice(0, -500);
-                archiveData.data.mailProcessed = oldProcessed;
-                mailProcessed = mailProcessed.slice(-500);
-                hasDataToArchive = true;
-            }
-            
-            // If we have data to archive, download it and save
-            if (hasDataToArchive) {
-                const archiveJson = JSON.stringify(archiveData, null, 2);
-                const blob = new Blob([archiveJson], { type: 'application/json' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                const dateStr = new Date(now).toISOString().split('T')[0];
-                a.href = url;
-                a.download = `poxboy-archive-${dateStr}.json`;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
                 
-                // Save cleaned data to localStorage
-                saveComms();
+                // If we have data to archive, download it and save
+                if (hasDataToArchive) {
+                    const archiveJson = JSON.stringify(archiveData, null, 2);
+                    const blob = new Blob([archiveJson], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    const dateStr = new Date(now).toISOString().split('T')[0];
+                    a.href = url;
+                    a.download = `poxboy-archive-${dateStr}.json`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    
+                    // Save cleaned data to localStorage
+                    saveComms();
+                    
+                    const itemCount = Object.values(archiveData.data).reduce((sum, arr) => sum + (Array.isArray(arr) ? arr.length : 0), 0);
+                    showNotification(`📦 Archived ${itemCount} old items to ${a.download}`);
+                } else if (manual) {
+                    showNotification('No old data to archive (data is newer than ' + archiveAgeDays + ' days)');
+                }
                 
-                const itemCount = Object.values(archiveData.data).reduce((sum, arr) => sum + (Array.isArray(arr) ? arr.length : 0), 0);
-                showNotification(`📦 Archived ${itemCount} old items to ${a.download}`);
-            } else if (manual) {
-                showNotification('No old data to archive (data is newer than 30 days)');
+                // Update last check time
+                lastArchiveCheck = now;
+                localStorage.setItem('pipboy-last-archive-check', now.toString());
+            } catch (e) {
+                console.error('Error in checkAndArchiveOldData:', e);
+                // Don't let archive errors crash the app
+                if (manual) {
+                    showNotification('Archive error: ' + e.message);
+                }
             }
-            
-            // Update last check time
-            lastArchiveCheck = now;
-            localStorage.setItem('pipboy-last-archive-check', now.toString());
         }
         
         // Emergency archive if storage is >90% full
