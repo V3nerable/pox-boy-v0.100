@@ -6658,16 +6658,17 @@
         const STORAGE_EMERGENCY_THRESHOLD = 0.90; // 90% capacity
         let lastArchiveCheck = parseInt(localStorage.getItem('pipboy-last-archive-check') || '0');
         
-        function checkAndArchiveOldData(manual = false) {
+        function checkAndArchiveOldData(manual = false, customAgeDays = null) {
             const now = Date.now();
-            const archiveThreshold = now - (ARCHIVE_AGE_DAYS * 24 * 60 * 60 * 1000);
+            const archiveAgeDays = customAgeDays !== null ? customAgeDays : ARCHIVE_AGE_DAYS;
+            const archiveThreshold = now - (archiveAgeDays * 24 * 60 * 60 * 1000);
             
             // Only run once per 24 hours unless manual
             if (!manual && (now - lastArchiveCheck) < ARCHIVE_CHECK_INTERVAL) {
                 return;
             }
             
-            console.log('Checking for old data to archive...');
+            console.log('Checking for old data to archive (threshold: ' + archiveAgeDays + ' days)...');
             
             const archiveData = {
                 archiveDate: new Date(now).toISOString(),
@@ -6763,10 +6764,7 @@
                 if (estimatedUsage > STORAGE_EMERGENCY_THRESHOLD) {
                     console.warn(`Storage at ${Math.round(estimatedUsage * 100)}% - triggering emergency archive`);
                     // Force archive with shorter threshold (7 days instead of 30)
-                    const originalThreshold = ARCHIVE_AGE_DAYS;
-                    ARCHIVE_AGE_DAYS = 7;
-                    checkAndArchiveOldData(true);
-                    ARCHIVE_AGE_DAYS = originalThreshold;
+                    checkAndArchiveOldData(true, 7);
                 }
             } catch (e) {
                 console.error('Error checking storage usage:', e);
@@ -10127,7 +10125,12 @@
         }
 
         // v0.198: Auto-archive old data on app startup (once per 24 hours)
-        checkAndArchiveOldData(false);
+        try {
+            checkAndArchiveOldData(false);
+        } catch (e) {
+            console.error('Error during auto-archive on startup:', e);
+            // Don't let archive errors prevent app from loading
+        }
 
         // ==================== PWA INSTALL PIPELINE (v0.32) ====================
         // Root cause of "install did nothing on Chrome": the WebAPK minting pipeline is
