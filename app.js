@@ -331,6 +331,12 @@
             saveToStorage();
             renderProfile();
             showNotification('☢ MUTATION GAINED: ' + pick.name + ' (' + pick.desc + ')');
+            // v0.191: Log mutation gained to chronicle
+            logChronicleEvent('mutation', myMailUid, userProfile.name || 'UNKNOWN', {
+                mutation: pick.name,
+                description: pick.desc,
+                totalMutations: activeMutations.length
+            });
         }
         function loseMutation(id) {
             const idx = activeMutations.indexOf(id);
@@ -3211,6 +3217,7 @@
         function acceptQuest(id) {
             const myUid = myMailUid; // Use myMailUid instead of localStorage
             const myName = userProfile.name || 'UNKNOWN';
+            const q = firebaseQuests[id];
             const progRef = window.firebaseRef(window.db, `quests/${id}/progress/${myUid}`);
             window.firebaseSet(progRef, {
                 acceptedAt: Date.now(),
@@ -3220,6 +3227,11 @@
                 .then(() => {
                     closeCustomPrompt();
                     showNotification('QUEST ACCEPTED');
+                    // v0.191: Log quest accepted to chronicle
+                    logChronicleEvent('questAccept', myUid, myName, {
+                        questTitle: q?.title || 'UNKNOWN',
+                        questType: q?.type || 'unknown'
+                    });
                     // Refresh the active quests tab after a short delay to allow Firebase listener to fire
                     setTimeout(() => {
                         switchQuestTab('active');
@@ -3295,6 +3307,12 @@
                     .then(() => {
                         closeCustomPrompt();
                         showNotification('QUEST COMPLETED - AWAITING VERIFICATION');
+                        // v0.191: Log quest completed to chronicle
+                        logChronicleEvent('questComplete', myUid, myName, {
+                            questTitle: q.title || 'UNKNOWN',
+                            questType: q.type || 'unknown',
+                            hasEvidence: !!updates.evidencePhoto
+                        });
                         // Send verify-request mail to issuer
                         if (q.issuerUid) {
                             queueMail(q.issuerUid, 'verify-request', {
@@ -3345,6 +3363,13 @@
                         .then(() => {
                             closeCustomPrompt();
                             showNotification('COMPLETION VERIFIED');
+                            // v0.191: Log quest verified to chronicle
+                            const completerName = prog?.completedByName || 'UNKNOWN';
+                            logChronicleEvent('questVerify', uid, completerName, {
+                                questTitle: q.title || 'UNKNOWN',
+                                questType: q.type || 'unknown',
+                                verifiedBy: userProfile.name || 'UNKNOWN'
+                            });
                             renderIssuedQuests();
                         })
                         .catch(err => showNotification('ERROR: ' + err.message));
@@ -3620,6 +3645,12 @@
                         closeCustomPrompt();
                         showNotification('☠ BOUNTY CLAIMED & VERIFIED');
                         playSound('xp');
+                        // v0.191: Log bounty claim to chronicle
+                        logChronicleEvent('bountyClaim', myUid, myName, {
+                            questTitle: q.title || 'UNKNOWN',
+                            targetName: q.targetName || 'UNKNOWN',
+                            hasEvidence: !!updates.evidencePhoto
+                        });
                         // v0.175: No verify-request needed - scan is proof
                         switchQuestTab('active');
                     })
@@ -5186,7 +5217,28 @@
             // v0.57: track distance travelled (haversine delta from previous fix)
             if (myLastLat !== null && myLastLng !== null) {
                 const d = getDistance(myLastLat, myLastLng, lat, lng);
-                if (d > 1 && d < 500) { funStats.distance += d; saveFunStats(); } // ignore jumps >500m (GPS glitch)
+                if (d > 1 && d < 500) { 
+                    funStats.distance += d; 
+                    saveFunStats();
+                    
+                    // v0.192: Flavor event - large single movement (>100m)
+                    if (d > 100) {
+                        logChronicleEvent('flavorSprint', myMailUid, userProfile.name || 'UNKNOWN', {
+                            distance: Math.round(d),
+                            totalDistance: (funStats.distance / 1000).toFixed(1)
+                        });
+                    }
+                    
+                    // v0.192: Flavor event - distance milestones (every 1km)
+                    const oldKm = Math.floor((funStats.distance - d) / 1000);
+                    const newKm = Math.floor(funStats.distance / 1000);
+                    if (newKm > oldKm && newKm > 0) {
+                        logChronicleEvent('flavorDistance', myMailUid, userProfile.name || 'UNKNOWN', {
+                            distance: newKm,
+                            unit: 'km'
+                        });
+                    }
+                } // ignore jumps >500m (GPS glitch)
             }
             myLastLat = lat; myLastLng = lng; // feeds map wastelander-card distance readout
             lastFixAt = Date.now();
@@ -5216,6 +5268,12 @@
                         wp.discovered = true;
                         changed = true;
                         showNotification("LOCATION DISCOVERED: " + wp.name);
+                        // v0.191: Log zone discovery to chronicle
+                        logChronicleEvent('zoneDiscovery', myMailUid, userProfile.name || 'UNKNOWN', {
+                            zone: wp.name,
+                            lat: wp.lat,
+                            lng: wp.lng
+                        });
                     }
                 }
             });
@@ -6247,6 +6305,14 @@
             const saved = photoArchive[0];
             showNotification('PHOTO SECURED: ' + (saved.raw && saved.pip ? 'RAW + PIP ' : '') + '(' + photoArchive.length + ' IN DATABANK).');
             if (localStorage.getItem('pipboy-auto-export') === '1') exportEntry(saved);
+            
+            // v0.192: Flavor event - photo milestones (every 10 photos)
+            const photoCount = photoArchive.length;
+            if (photoCount > 0 && photoCount % 10 === 0) {
+                logChronicleEvent('flavorPhotoMilestone', myMailUid, userProfile.name || 'UNKNOWN', {
+                    count: photoCount
+                });
+            }
         }
 
         // ================= GALLERY EXPORT / SHARE (v0.43) =================
@@ -6677,6 +6743,7 @@
 
         function addContact(uid, name) {
             if (isContact(uid)) return;
+            const isFirstContact = rolodex.length === 0;
             rolodex.push({ uid: uid, name: name || 'UNKNOWN', metAt: Date.now() });
             saveComms();
             // Promote any quarantined transmissions from this frequency into the live inbox
@@ -6690,6 +6757,14 @@
             }
             showNotification('CONTACT SECURED: ' + (name || 'UNKNOWN') + (promoted ? ' (' + promoted + ' HELD TRANSMISSION' + (promoted > 1 ? 'S' : '') + ' UNLOCKED)' : ''));
             renderMailBadge();
+            
+            // v0.192: Flavor event - first contact
+            if (isFirstContact) {
+                logChronicleEvent('flavorFirstContact', myMailUid, userProfile.name || 'UNKNOWN', {
+                    contactName: name || 'UNKNOWN',
+                    totalContacts: rolodex.length
+                });
+            }
         }
 
         // One-scan mutual link: scanning a datacard posts a handshake into THEIR mailbox;
@@ -6879,7 +6954,18 @@
             const after = Math.min(1000, Math.max(0, before + delta));
             if (after === before) return;
             // v0.57: track lifetime rads absorbed (positive deltas only)
-            if (delta > 0) { bumpFunStat('radsTotal', delta); }
+            if (delta > 0) { 
+                bumpFunStat('radsTotal', delta);
+                
+                // v0.192: Flavor event - large rad dose (>50 rads at once)
+                if (delta >= 50) {
+                    logChronicleEvent('flavorRadDose', myMailUid, userProfile.name || 'UNKNOWN', {
+                        dose: delta,
+                        totalRads: after,
+                        lifetimeRads: funStats.radsTotal
+                    });
+                }
+            }
             // v0.57: near-death tracking (HP below 20%)
             const newHp = Math.max(0, userProfile.maxHp - Math.floor((after / 1000) * userProfile.maxHp));
             if (newHp < userProfile.maxHp * 0.2 && before < 1000 && newHp > 0) {
@@ -6896,6 +6982,10 @@
                     localStorage.setItem('pipboy-glowing-one-checked', 'true');
                     showNotification('☢ RADIATION SURGE — YOU HAVE BECOME A GLOWING ONE ☢');
                     bumpFunStat('glowingOne', 1);
+                    // v0.191: Log Glowing One transformation to chronicle
+                    logChronicleEvent('glowingOne', myMailUid, userProfile.name || 'UNKNOWN', {
+                        rads: after
+                    });
                     // Announce to nearby players
                     if (window.db && myMailUid && myLastLat !== null) {
                         const announceRef = window.firebaseRef(window.db, 'glowingAnnouncements/' + myMailUid);
@@ -6910,6 +7000,11 @@
                     // 9/10 chance: die (0 HP)
                     showNotification('☢ CRITICAL RADIATION — YOU ARE DOWN ☢');
                     bumpFunStat('radDeaths', 1);
+                    // v0.191: Log death to chronicle
+                    logChronicleEvent('death', myMailUid, userProfile.name || 'UNKNOWN', {
+                        rads: after,
+                        cause: 'radiation'
+                    });
                 }
             }
             // Reset Glowing One check when rads reset to 0
@@ -10419,6 +10514,32 @@
                     "{users} stumbled upon {zone}. The Geiger counter clicked approvingly. Or maybe it was just dying. Hard to tell.",
                     "The wasteland revealed {zone} to {users}. A gift? A curse? A really bad real estate opportunity? Time will tell.",
                     "{users} discovered {zone}. The good news? It's on the map. The bad news? Everything else."
+                ],
+                // v0.192: Flavor events
+                flavorSprint: [
+                    "{users} just sprinted {distance}m across the wastes. Either they're in a hurry, or something's chasing them. Probably both.",
+                    "The wasteland blurred as {users} covered {distance}m in record time. Cardio? In this economy? Impressive.",
+                    "{users} moved {distance}m so fast their Geiger counter couldn't keep up. The radiation was left in the dust. For now."
+                ],
+                flavorDistance: [
+                    "{users} has now traveled {distance}km through the wasteland. That's a lot of irradiated footsteps.",
+                    "The odometer clicked over to {distance}km for {users}. Each kilometer a story. Most of them involving near-death experiences.",
+                    "{users} crossed the {distance}km mark today. The wasteland is vast, but they're vaster. Or at least more stubborn."
+                ],
+                flavorRadDose: [
+                    "{users} just absorbed {dose} rads in one go. That's not a tan, that's a transformation.",
+                    "The Geiger counter screamed as {users} took a {dose} rad hit. They didn't scream. They were too busy glowing.",
+                    "{users} absorbed {dose} rads in a single dose. Their DNA is now more suggestion than blueprint."
+                ],
+                flavorFirstContact: [
+                    "{users} made their first contact: {contactName}. The wasteland just got a little less lonely. Or a little more dangerous.",
+                    "The scanner beeped as {users} logged {contactName}. First contact achieved. Now the real fun begins.",
+                    "{users} met {contactName} today. Friend? Foe? Future bounty target? The wasteland keeps score."
+                ],
+                flavorPhotoMilestone: [
+                    "{users} just took their {count}th photo. The databank is filling up with memories. Most of them involving radiation and regret.",
+                    "Click. {users} captured their {count}th wasteland moment. The camera never lies, but it does glow in the dark.",
+                    "The shutter clicked for the {count}th time as {users} documented their descent into madness. Or just their vacation. Hard to tell."
                 ]
             };
             
@@ -10431,12 +10552,20 @@
             const rads = mainEvent.data?.rads || 0;
             const mutation = mainEvent.data?.mutation || 'something weird';
             const zone = mainEvent.data?.zone || 'a mysterious location';
+            const distance = mainEvent.data?.distance || 0;
+            const dose = mainEvent.data?.dose || 0;
+            const contactName = mainEvent.data?.contactName || 'someone';
+            const count = mainEvent.data?.count || 0;
             
             return template
                 .replace(/{users}/g, userNames)
                 .replace(/{rads}/g, rads)
                 .replace(/{mutation}/g, mutation)
-                .replace(/{zone}/g, zone);
+                .replace(/{zone}/g, zone)
+                .replace(/{distance}/g, distance)
+                .replace(/{dose}/g, dose)
+                .replace(/{contactName}/g, contactName)
+                .replace(/{count}/g, count);
         }
         
         function saveChronicleEntry(entry) {
