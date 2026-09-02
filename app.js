@@ -2689,8 +2689,16 @@
             const desc = document.getElementById('new-quest-desc').value.trim();
             const reward = document.getElementById('new-quest-reward').value.trim();
             if (!title) { showNotification('TITLE REQUIRED'); return; }
-            const myUid = localStorage.getItem('pipboy-uid');
+            const myUid = myMailUid; // v0.204: Use myMailUid for consistency
             const myName = userProfile.name || 'UNKNOWN';
+            
+            // v0.204: Verify UID exists
+            if (!myUid) {
+                showNotification('ERROR: No user ID found. Please restart app.');
+                console.error('submitQuest: myMailUid is null/undefined');
+                return;
+            }
+            
             const questData = {
                 type: type,
                 title: title,
@@ -2713,13 +2721,16 @@
                 questData.targetName = targetName;
             }
             const questRef = window.firebaseRef(window.db, 'quests/');
+            console.log('submitQuest: Creating quest with data:', questData);
             window.firebasePush(questRef, questData)
                 .then(ref => {
                     const questId = ref.key;
-                    showNotification('QUEST CREATED');
+                    console.log('submitQuest: Quest created with ID:', questId);
+                    showNotification('QUEST CREATED (ID: ' + questId.substring(0, 8) + '...)');
                     if (type === 'direct') {
                         // Send quest-offer mail to recipient
                         const recipientUid = document.getElementById('new-quest-recipient').value;
+                        console.log('submitQuest: Sending quest-offer mail to:', recipientUid);
                         queueMail(recipientUid, 'quest-offer', {
                             questId: questId,
                             title: title,
@@ -2727,9 +2738,20 @@
                             reward: reward
                         }, 'QUEST OFFER: ' + title);
                     }
+                    // v0.204: Force refresh of firebaseQuests to ensure quest appears immediately
+                    if (window.db) {
+                        window.firebaseOnValue(window.firebaseRef(window.db, 'quests/'), (snap) => {
+                            firebaseQuests = snap.val() || {};
+                            console.log('submitQuest: Refreshed firebaseQuests, count:', Object.keys(firebaseQuests).length);
+                            renderIssuedQuests();
+                        }, () => {}, { onlyOnce: true });
+                    }
                     switchQuestTab('issued');
                 })
-                .catch(err => showNotification('ERROR: ' + err.message));
+                .catch(err => {
+                    console.error('submitQuest: Error creating quest:', err);
+                    showNotification('ERROR CREATING QUEST: ' + err.message);
+                });
         }
 
         function openQuestModal(id) {
@@ -7925,10 +7947,19 @@
 
         // v0.91: Accept a direct quest from mail
         function acceptQuestFromMail(key, l) {
-            const myUid = localStorage.getItem('pipboy-uid');
+            const myUid = myMailUid; // v0.203: Use myMailUid for consistency
             const myName = userProfile.name || 'UNKNOWN';
             const questId = l.payload && l.payload.questId;
             if (!questId) { showNotification('QUEST DATA MISSING'); declineLetter(key); return; }
+            
+            // v0.203: Check if quest exists in Firebase before accepting
+            const quest = firebaseQuests[questId];
+            if (!quest) {
+                showNotification('QUEST NOT FOUND - MAY HAVE BEEN CANCELLED');
+                declineLetter(key);
+                return;
+            }
+            
             const progRef = window.firebaseRef(window.db, 'quests/' + questId + '/progress/' + myUid);
             window.firebaseSet(progRef, {
                 acceptedAt: Date.now(),
@@ -10519,7 +10550,7 @@
             });
         }
 
-        // ==================== QUEST STATUS MODAL SYSTEM (v0.201) ====================
+        // ==================== QUEST STATUS MODAL SYSTEM (v0.202) ====================
         // Shows modal with appropriate sounds for quest status changes
         function showQuestStatusModal(status, questTitle, details = '') {
             try {
@@ -10579,39 +10610,47 @@
                     playSound(config.sound);
                 }
                 
-                // Build modal content (safely escape HTML)
+                // Safely escape HTML for text content
                 const escapeHtml = (s) => {
                     if (typeof s !== 'string') return '';
                     return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
                 };
                 
-                const modalContent = `
-                    <div style="text-align: center; padding: 20px;">
-                        <div style="font-size: 4rem; color: ${config.color}; text-shadow: 0 0 20px ${config.color}; margin-bottom: 15px;">
-                            ${config.icon}
+                // Build modal HTML
+                const modalHtml = `
+                    <div id="quest-status-modal" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.85); z-index: 10000; display: flex; align-items: center; justify-content: center; padding: 20px;">
+                        <div style="background: var(--pip-bg, #0a0a0a); border: 2px solid ${config.color}; border-radius: 8px; max-width: 500px; width: 100%; box-shadow: 0 0 30px ${config.color}40; max-height: 90vh; overflow-y: auto;">
+                            <div style="text-align: center; padding: 30px 20px;">
+                                <div style="font-size: 5rem; color: ${config.color}; text-shadow: 0 0 30px ${config.color}; margin-bottom: 20px; line-height: 1;">
+                                    ${config.icon}
+                                </div>
+                                <h2 style="color: ${config.color}; text-shadow: 0 0 15px ${config.color}; margin: 0 0 20px 0; font-size: 1.8rem;">
+                                    ${config.title}
+                                </h2>
+                                <div style="font-size: 1.2rem; margin-bottom: 20px; opacity: 0.95; color: var(--pip-color, #1aff80);">
+                                    ${escapeHtml(questTitle)}
+                                </div>
+                                <div style="font-size: 1rem; opacity: 0.85; margin-bottom: 25px; line-height: 1.5; color: var(--pip-color, #1aff80);">
+                                    ${config.message}
+                                </div>
+                                ${details ? `<div style="font-size: 0.95rem; opacity: 0.75; margin-bottom: 25px; padding: 15px; background: rgba(0,0,0,0.4); border-radius: 6px; border: 1px solid ${config.color}40; color: var(--pip-color, #1aff80);">${escapeHtml(details)}</div>` : ''}
+                                <button class="pip-btn" onclick="document.getElementById('quest-status-modal').remove()" style="border-color: ${config.color}; color: ${config.color}; padding: 12px 30px; font-size: 1.1rem;">
+                                    [CLOSE]
+                                </button>
+                            </div>
                         </div>
-                        <h2 style="color: ${config.color}; text-shadow: 0 0 10px ${config.color}; margin: 0 0 15px 0;">
-                            ${config.title}
-                        </h2>
-                        <div style="font-size: 1.1rem; margin-bottom: 15px; opacity: 0.9;">
-                            ${escapeHtml(questTitle)}
-                        </div>
-                        <div style="font-size: 0.95rem; opacity: 0.8; margin-bottom: 20px;">
-                            ${config.message}
-                        </div>
-                        ${details ? `<div style="font-size: 0.9rem; opacity: 0.7; margin-bottom: 20px; padding: 10px; background: rgba(0,0,0,0.3); border-radius: 4px;">${escapeHtml(details)}</div>` : ''}
                     </div>
                 `;
                 
-                // Show modal (safely check if function exists)
-                if (typeof showCustomPrompt === 'function') {
-                    showCustomPrompt(modalContent, [
-                        { label: 'CLOSE', action: () => {} }
-                    ]);
-                }
+                // Insert modal into DOM
+                document.body.insertAdjacentHTML('beforeend', modalHtml);
+                
             } catch (e) {
                 console.error('Error in showQuestStatusModal:', e);
-                // Don't let modal errors crash the app
+                // Fallback to notification if modal fails
+                if (typeof showNotification === 'function') {
+                    showNotification(config.title + ': ' + questTitle);
+                }
             }
         }
 
